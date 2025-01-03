@@ -285,7 +285,7 @@ class EDSmap:
         # do cluster analysis either from decomposed signals, or from all signals (FoV included) and plot the result
         
         hdbs = HDBSCAN(allow_single_cluster= True,
-                       cluster_selection_method= 'eom',
+                       cluster_selection_method= 'leaf',
                        min_cluster_size = self.cl_params["min_cluster_size"],
                        min_samples = self.cl_params["min_samples"],
                        metric = 'seuclidean',
@@ -315,7 +315,7 @@ class EDSmap:
             ph_spc_raw[i,:] = self.eds.data[mask,:].sum(0)
             
             # add to final mask only if number of points is larger than "cutoff"
-            if (self.ph_num_pts[i] > self.cl_params["cutoff"]):
+            if self.ph_num_pts[i] > self.cl_params["cutoff"]:
                 valid_mask_map = np.logical_or(valid_mask_map, mask)
         
             
@@ -579,15 +579,7 @@ class EDSmap:
             pickle.dump(self.cl_params, fpickle)
         
         plt.close("all")
-        return(result_pars)
-
-    def savedata(self):
-        with open((self.barefile+"/"+str(self.comp)+"_ph_map.pickle"), 'wb+') as f:
-            pickle.dump(self.phase_map, f)
-
-        self.ph_spc.save(self.barefile+"/"+str(self.comp)+"_ph_spc.hspy", overwrite=True)
-        self.ph_spc.inav[0].save(self.barefile+"/"+str(self.comp)+"_ph_spc.msa", overwrite=True, encoding = 'utf8')
-
+        return result_pars
 
 def export_std_to_msa(fname, current):
     """
