@@ -7,7 +7,7 @@ import h5py
 from sklearn.cluster import HDBSCAN
 
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Button, Slider
+from matplotlib.widgets import Button, Slider, CheckButtons
 from matplotlib.colors import LinearSegmentedColormap
 
 from mendeleev import element
@@ -56,7 +56,7 @@ def phase_map_plot(data, ax):
     return im
 
 
-def process_EDSatlas(fname, h5_path, element_list = None, binning = 1, use_fov = False, quiet = False):
+def process_EDSatlas(fname, h5_path, element_list = None, binning = 1, quiet = False):
     
     f = h5py.File(fname, "r")
     atlas = f[h5_path]
@@ -66,7 +66,7 @@ def process_EDSatlas(fname, h5_path, element_list = None, binning = 1, use_fov =
     for i, comp in enumerate(atlas.keys()):
         print(h5_path+'/'+comp)
         mapa = EDSmap(fname, h5_path+'/'+comp, element_list)
-        result, cl_params = mapa.process(binning, use_fov, quiet)
+        result, cl_params = mapa.process(binning, quiet)
         atlas_pars.extend(result)
            
     with open(fname+'.csv','w', newline='', encoding='utf-8') as fcsv:
@@ -74,9 +74,9 @@ def process_EDSatlas(fname, h5_path, element_list = None, binning = 1, use_fov =
         wr.writerow(FIELDS)
         wr.writerows(atlas_pars)
 
-def process_EDSmap(fname, h5_path, element_list = None, binning = 1, use_fov = False, quiet = False):
+def process_EDSmap(fname, h5_path, element_list = None, binning = 1, quiet = False):
     eds_map = EDSmap(fname, h5_path, element_list)
-    eds_map.process(binning, use_fov, quiet)
+    eds_map.process(binning, quiet)
 
 
 class EDSmap:
@@ -97,7 +97,8 @@ class EDSmap:
             self.cl_params = {"min_samples" : 4,
                               "min_cluster_size" : 200,
                               "cutoff": 50,
-                              "components": 3}
+                              "components": 3,
+                              "use_fov": False}
         else:
             with fpickle:
                 self.cl_params = pickle.load(fpickle)
@@ -121,11 +122,10 @@ class EDSmap:
         return cmap_list
     
     
-    def process(self, binning, use_fov, quiet, dead_time = 0.3):
-        self.use_fov = use_fov
+    def process(self, binning, quiet, dead_time = 0.3):
         
         # rebinning to improve phase discrimination
-        if (binning != 1):
+        if binning != 1:
             self.rebin(binning)
         
         if quiet:
@@ -168,11 +168,13 @@ class EDSmap:
 
         spd_raw = spd_dts[()]
         self.eds = hs.signals.Signal1D(spd_raw)
-        
+        print("EDS loaded")
+
         fov_dts = f[h5_path + '/FOVIMAGE']
         fov_raw = fov_dts[()].reshape(self.eds.isig[0].data.shape)
         self.fov = hs.signals.BaseSignal(fov_raw)
-        
+        print("FOV loaded")
+
         self.eds.set_signal_type("EDS_SEM")
         self.eds.change_dtype("float32")
 
@@ -272,7 +274,7 @@ class EDSmap:
         self.dec_loads = np.concatenate(( self.dec_loads, np.atleast_2d(self.dec_loads_sum)), axis = 0)
         
         # add FoV it to the decomposed signals
-        if self.use_fov:
+        if self.cl_params["use_fov"]:
             self.to_cluster = np.concatenate((np.reshape(self.fov.data, (self.fov.data.size, 1)), self.dec_loads.T), axis=1)
         else:
             self.to_cluster = self.dec_loads.T
@@ -353,6 +355,7 @@ class EDSmap:
             self.cl_params["min_samples"] = sl_smp.val
             self.cl_params["cutoff"] = sl_cut.val
             self.cl_params["components"] = sl_comp.val
+            self.cl_params["use_fov"] = b_fov.get_status()[0]
         
         def recluster(event):
             self.repeat = "cluster"
@@ -370,7 +373,8 @@ class EDSmap:
         def go_on(event):
             self.repeat = None
             plt.close("all")
-        
+
+
         fig, ax = plt.subplots(2,3, figsize=(18, 9), gridspec_kw={'width_ratios': [2, 2, 1]})
         
         phase_map_plot(self.phase_map_valid, ax[0,0])
@@ -407,8 +411,8 @@ class EDSmap:
         ax[1,2].remove()
         
         
-        # hard cutoff - phases with less then "hard cutoff" points will not be exported
-        ax_cut = fig.add_axes([0.77, 0.15, 0.03, 0.75])
+        # hard cutoff - phases with less than "hard cutoff" points will not be exported
+        ax_cut = fig.add_axes([0.77, 0.2, 0.03, 0.75])
         sl_cut = Slider(
             ax=ax_cut,
             label="hard cutoff",
@@ -420,7 +424,7 @@ class EDSmap:
         )
         
         # control elements of clustering parameters
-        ax_cls = fig.add_axes([0.83, 0.15, 0.03, 0.75])
+        ax_cls = fig.add_axes([0.83, 0.2, 0.03, 0.75])
         sl_cls = Slider(
             ax=ax_cls,
             label='min_cluster_size',
@@ -431,7 +435,7 @@ class EDSmap:
             valstep = 10
         )
         
-        ax_smp = fig.add_axes([0.89, 0.15, 0.03, 0.75])
+        ax_smp = fig.add_axes([0.89, 0.2, 0.03, 0.75])
         sl_smp = Slider(
             ax=ax_smp,
             label="min_samples",
@@ -443,7 +447,7 @@ class EDSmap:
         )
         
         # decomposition dimension
-        ax_comp = fig.add_axes([0.95, 0.15, 0.03, 0.75])
+        ax_comp = fig.add_axes([0.95, 0.2, 0.03, 0.75])
         sl_comp = Slider(
             ax=ax_comp,
             label="components",
@@ -453,16 +457,19 @@ class EDSmap:
             valinit=self.cl_params["components"],
             valstep=1
         )
-        
-        ax_b1 = fig.add_axes([0.770, 0.05, 0.05, 0.05])
-        ax_b2 = fig.add_axes([0.825, 0.05, 0.05, 0.05])
-        ax_b3 = fig.add_axes([0.880, 0.05, 0.05, 0.05])
-        ax_b4 = fig.add_axes([0.935, 0.05, 0.05, 0.05])
+
+        ax_b1 = fig.add_axes([0.770, 0.1, 0.05, 0.05])
+        ax_b2 = fig.add_axes([0.825, 0.1, 0.05, 0.05])
+        ax_b3 = fig.add_axes([0.880, 0.1, 0.05, 0.05])
+        ax_b4 = fig.add_axes([0.935, 0.1, 0.05, 0.05])
+        ax_fov = fig.add_axes([0.770, 0.01, 0.05, 0.05])
+
         b1 = Button(ax_b1, 'Cluster', hovercolor='0.975')
         b2 = Button(ax_b2, 'Decompose', hovercolor='0.975')
         b3 = Button(ax_b3, 'Save', hovercolor='0.975')
         b4 = Button(ax_b4, 'Elements', hovercolor='0.975')
-        
+        b_fov = CheckButtons(ax_fov,['Use FoV'], actives=[self.cl_params["use_fov"]])
+
         b1.on_clicked(recluster)
         b2.on_clicked(redecompose)
         b3.on_clicked(go_on)
@@ -667,13 +674,12 @@ if __name__ == "__main__":
     parser.add_argument('-e', '--elements', nargs = '+', help = "List of chemical element symbols to be used; the list from H5 file is used if not provided expicitly.")
     parser.add_argument('-b', '--binning', type = int, default=1, help = "Spatial binning")
     parser.add_argument('-q', '--quiet', action = 'store_true', help = "Does not open GUI, uses previously saved parameters from processing.")
-    parser.add_argument('-f', '--fov', action = 'store_true', help = "Add SEM signal (FoV) to the decomposed EDS and use it for clustering (may be beneficial when phases are well distinguishable on SEM).")
-    
+
     args = parser.parse_args()
     
     if args.atlas:
-        process_EDSatlas(args.filename, args.h5path, args.elements, args.binning, args.fov, args.quiet)
+        process_EDSatlas(args.filename, args.h5path, args.elements, args.binning, args.quiet)
         
     elif args.map:
-        process_EDSmap(args.filename, args.h5path, args.elements, args.binning, args.fov, args.quiet)
+        process_EDSmap(args.filename, args.h5path, args.elements, args.binning, args.quiet)
 
