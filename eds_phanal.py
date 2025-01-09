@@ -4,7 +4,8 @@ import pickle
 import argparse as ap
 import h5py
 
-from sklearn.cluster import HDBSCAN
+from hdbscan import HDBSCAN
+#from sklearn.cluster import HDBSCAN
 
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Button, Slider, CheckButtons
@@ -258,12 +259,7 @@ class EDSmap:
     
     def decompose_phases(self):
         # phase decomposition
-        
-        self.eds.decomposition(algorithm = "sklearn_pca",
-                                output_dimension = 8)
-        
-        self.eds.pca_variance = self.eds.get_explained_variance_ratio()
-        
+
         self.eds.decomposition(algorithm="NMF",
                                 output_dimension = self.cl_params["components"],
                                 max_iter = 200)
@@ -284,22 +280,33 @@ class EDSmap:
         
         # do cluster analysis either from decomposed signals, or from all signals (FoV included) and plot the result
         
+        # hdbs = HDBSCAN(allow_single_cluster= True,
+        #                cluster_selection_method= 'leaf',
+        #                min_cluster_size = self.cl_params["min_cluster_size"],
+        #                min_samples = self.cl_params["min_samples"],
+        #                metric = 'seuclidean',
+        #                metric_params={'V' : self.to_cluster.var(axis=0)},
+        #                n_jobs = -1)
+
         hdbs = HDBSCAN(allow_single_cluster= True,
                        cluster_selection_method= 'leaf',
                        min_cluster_size = self.cl_params["min_cluster_size"],
                        min_samples = self.cl_params["min_samples"],
                        metric = 'seuclidean',
-                       metric_params={'V' : self.to_cluster.var(axis=0)},
-                       n_jobs = -1)
-                  
-        hdbs.fit(self.to_cluster)
-        
+                       core_dist_n_jobs = -1,
+                       V = self.to_cluster.var(axis=0)
+        )
+
+        clusterer = hdbs.fit(self.to_cluster)
+        self.cluster_tree = clusterer.condensed_tree_
+
         # number of identified phases
         self.n_phases = np.max(hdbs.labels_) + 1
         
         # create map of phase indices
         phase_map_raw = hdbs.labels_.reshape(self.eds.isig[0].data.shape)
-               
+
+
         self.ph_num_pts = np.zeros(self.n_phases, dtype="int")        
         ph_spc_raw = np.zeros((self.n_phases, self.eds.data.shape[-1]))
         
@@ -320,11 +327,12 @@ class EDSmap:
         
             
         # sort phases based on number of points and reindex phase map
-        ph_order_desc       = np.argsort(-self.ph_num_pts, kind = 'stable')
-        ph_order_desc_inv   = np.argsort(ph_order_desc)
-        self.ph_num_pts     = self.ph_num_pts[ph_order_desc]
-        ph_spc_raw          = ph_spc_raw[ph_order_desc,:]
-        self.phase_map      = ph_order_desc_inv[phase_map_raw]        
+        self.ph_order_desc       = np.argsort(-self.ph_num_pts, kind = 'stable')
+        self.ph_order_desc_inv   = np.argsort(self.ph_order_desc)
+        self.ph_num_pts     = self.ph_num_pts[self.ph_order_desc]
+        ph_spc_raw          = ph_spc_raw[self.ph_order_desc,:]
+        # self.phase_map = phase_map_raw
+        self.phase_map      = self.ph_order_desc_inv[phase_map_raw]
         
         # cutoff minor phases
         valid_mask_ph = (self.ph_num_pts > self.cl_params["cutoff"])
@@ -375,7 +383,7 @@ class EDSmap:
             plt.close("all")
 
 
-        fig, ax = plt.subplots(2,3, figsize=(18, 9), gridspec_kw={'width_ratios': [2, 2, 1]})
+        fig, ax = plt.subplots(2,3, figsize=(14, 7), gridspec_kw={'width_ratios': [2, 2, 1]})
         
         phase_map_plot(self.phase_map_valid, ax[0,0])
             
@@ -400,19 +408,22 @@ class EDSmap:
                       self.dec_loads[1,subsample], 
                       self.dec_loads[2,subsample], 
                       c = self.phase_map_valid.flatten()[subsample], 
-                       cmap = (LinearSegmentedColormap.from_list('cmap_cur',
+                      cmap = (LinearSegmentedColormap.from_list('cmap_cur',
                                                                 phase_cmap.colors[np.min(self.phase_map_valid)+1:np.max([np.max(self.phase_map_valid)+2],0)],
                                                                 np.max([np.max(self.phase_map_valid)-np.min(self.phase_map_valid)+1],0)) if np.max(self.phase_map_valid)!=np.min(self.phase_map_valid) else 'Set1'),
                       marker = '.',
                       s = self.dec_loads_sum[subsample]
                       )
-        ax[1,1].plot(self.eds.pca_variance, 'o', ms = 4)
+
+        ax[1, 1].remove()
+        ax[1, 1] = fig.add_axes((0.4, 0.05, 0.35, 0.4))
+        self.cluster_tree.plot(select_clusters=True, label_clusters=True, selection_palette = phase_cmap.colors[:], axis=ax[1,1])
+
         ax[0,2].remove()
         ax[1,2].remove()
         
-        
         # hard cutoff - phases with less than "hard cutoff" points will not be exported
-        ax_cut = fig.add_axes([0.77, 0.2, 0.03, 0.75])
+        ax_cut = fig.add_axes((0.77, 0.2, 0.03, 0.75))
         sl_cut = Slider(
             ax=ax_cut,
             label="hard cutoff",
@@ -474,8 +485,7 @@ class EDSmap:
         b2.on_clicked(redecompose)
         b3.on_clicked(go_on)
         b4.on_clicked(eds)
-        fig.subplots_adjust(left=0,right=0.99,top=0.99,bottom=0.0,hspace=0.0,wspace=0.0)  
-        ax[1,1].set_position([0.45,0.05,0.3,0.4])
+        fig.subplots_adjust(left=0,right=0.99,top=0.99,bottom=0.0,hspace=0.0,wspace=0.0)
         plt.show()
         
         return self.repeat
