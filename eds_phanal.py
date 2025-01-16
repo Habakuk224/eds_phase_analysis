@@ -289,7 +289,7 @@ class EDSmap:
         #                n_jobs = -1)
 
         hdbs = HDBSCAN(allow_single_cluster= True,
-                       cluster_selection_method= 'leaf',
+                       cluster_selection_method= 'eom',
                        min_cluster_size = self.cl_params["min_cluster_size"],
                        min_samples = self.cl_params["min_samples"],
                        metric = 'seuclidean',
@@ -306,12 +306,11 @@ class EDSmap:
         # create map of phase indices
         phase_map_raw = hdbs.labels_.reshape(self.eds.isig[0].data.shape)
 
-
         self.ph_num_pts = np.zeros(self.n_phases, dtype="int")        
         ph_spc_raw = np.zeros((self.n_phases, self.eds.data.shape[-1]))
-        
-        # all points start as invalid
-        valid_mask_map = np.zeros_like(phase_map_raw, dtype = bool)
+
+        # points with -1 are invalid
+        valid_mask_map = (phase_map_raw != -1)
         
         for i in range(self.n_phases):
             # current phase mask
@@ -322,18 +321,16 @@ class EDSmap:
             ph_spc_raw[i,:] = self.eds.data[mask,:].sum(0)
             
             # add to final mask only if number of points is larger than "cutoff"
-            if self.ph_num_pts[i] > self.cl_params["cutoff"]:
-                valid_mask_map = np.logical_or(valid_mask_map, mask)
-        
-            
+            if self.ph_num_pts[i] < self.cl_params["cutoff"]:
+                valid_mask_map[mask] = False
+
         # sort phases based on number of points and reindex phase map
-        self.ph_order_desc       = np.argsort(-self.ph_num_pts, kind = 'stable')
-        self.ph_order_desc_inv   = np.argsort(self.ph_order_desc)
+        self.ph_order_desc       = np.argsort(self.ph_num_pts, kind = 'stable')[::-1]
+        self.ph_order_desc_inv   = np.insert(np.argsort(self.ph_order_desc),0,-1)
         self.ph_num_pts     = self.ph_num_pts[self.ph_order_desc]
         ph_spc_raw          = ph_spc_raw[self.ph_order_desc,:]
-        # self.phase_map = phase_map_raw
-        self.phase_map      = self.ph_order_desc_inv[phase_map_raw]
-        
+        self.phase_map      = self.ph_order_desc_inv[phase_map_raw+1]
+
         # cutoff minor phases
         valid_mask_ph = (self.ph_num_pts > self.cl_params["cutoff"])
         self.ph_num_pts_clustered   = int(np.sum(self.ph_num_pts))              # clustered points
@@ -387,7 +384,7 @@ class EDSmap:
         
         phase_map_plot(self.phase_map_valid, ax[0,0])
             
-        ax[0,0].axis('off')        
+        ax[0,0].axis('off')
         ax[0,1].imshow(self.fov, cmap='Greys_r')   
         ax[0,1].axis('off')
         
@@ -405,19 +402,17 @@ class EDSmap:
                                          np.zeros_like(self.dec_loads[0,:])) )
                                        
         ax[1,0].scatter(self.dec_loads[0,subsample], 
-                      self.dec_loads[1,subsample], 
-                      self.dec_loads[2,subsample], 
-                      c = self.phase_map_valid.flatten()[subsample], 
-                      cmap = (LinearSegmentedColormap.from_list('cmap_cur',
-                                                                phase_cmap.colors[np.min(self.phase_map_valid)+1:np.max([np.max(self.phase_map_valid)+2],0)],
-                                                                np.max([np.max(self.phase_map_valid)-np.min(self.phase_map_valid)+1],0)) if np.max(self.phase_map_valid)!=np.min(self.phase_map_valid) else 'Set1'),
-                      marker = '.',
-                      s = self.dec_loads_sum[subsample]
-                      )
+                        self.dec_loads[1,subsample],
+                        self.dec_loads[2,subsample],
+                        color = phase_cmap.colors[self.phase_map_valid.flatten()[subsample] + 1], # shift by 1, because invalid points with -1 are black (colors[0])
+                        marker = '.',
+                        s = self.dec_loads_sum[subsample]
+                        )
 
         ax[1, 1].remove()
         ax[1, 1] = fig.add_axes((0.4, 0.05, 0.35, 0.4))
-        self.cluster_tree.plot(select_clusters=True, label_clusters=True, selection_palette = phase_cmap.colors[:], axis=ax[1,1])
+
+        self.cluster_tree.plot(select_clusters=True, selection_palette = phase_cmap.colors[1:][self.ph_order_desc_inv[1:]], axis=ax[1,1])
 
         ax[0,2].remove()
         ax[1,2].remove()
@@ -435,7 +430,7 @@ class EDSmap:
         )
         
         # control elements of clustering parameters
-        ax_cls = fig.add_axes([0.83, 0.2, 0.03, 0.75])
+        ax_cls = fig.add_axes((0.83, 0.2, 0.03, 0.75))
         sl_cls = Slider(
             ax=ax_cls,
             label='min_cluster_size',
@@ -446,7 +441,7 @@ class EDSmap:
             valstep = 10
         )
         
-        ax_smp = fig.add_axes([0.89, 0.2, 0.03, 0.75])
+        ax_smp = fig.add_axes((0.89, 0.2, 0.03, 0.75))
         sl_smp = Slider(
             ax=ax_smp,
             label="min_samples",
@@ -458,7 +453,7 @@ class EDSmap:
         )
         
         # decomposition dimension
-        ax_comp = fig.add_axes([0.95, 0.2, 0.03, 0.75])
+        ax_comp = fig.add_axes((0.95, 0.2, 0.03, 0.75))
         sl_comp = Slider(
             ax=ax_comp,
             label="components",
@@ -469,11 +464,11 @@ class EDSmap:
             valstep=1
         )
 
-        ax_b1 = fig.add_axes([0.770, 0.1, 0.05, 0.05])
-        ax_b2 = fig.add_axes([0.825, 0.1, 0.05, 0.05])
-        ax_b3 = fig.add_axes([0.880, 0.1, 0.05, 0.05])
-        ax_b4 = fig.add_axes([0.935, 0.1, 0.05, 0.05])
-        ax_fov = fig.add_axes([0.770, 0.01, 0.05, 0.05])
+        ax_b1 = fig.add_axes((0.770, 0.1, 0.05, 0.05))
+        ax_b2 = fig.add_axes((0.825, 0.1, 0.05, 0.05))
+        ax_b3 = fig.add_axes((0.880, 0.1, 0.05, 0.05))
+        ax_b4 = fig.add_axes((0.935, 0.1, 0.05, 0.05))
+        ax_fov = fig.add_axes((0.770, 0.01, 0.05, 0.05))
 
         b1 = Button(ax_b1, 'Cluster', hovercolor='0.975')
         b2 = Button(ax_b2, 'Decompose', hovercolor='0.975')
