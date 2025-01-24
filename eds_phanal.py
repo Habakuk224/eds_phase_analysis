@@ -3,6 +3,7 @@ import numpy as np
 import pickle
 import argparse as ap
 import h5py
+import os
 
 from hdbscan import HDBSCAN
 #from sklearn.cluster import HDBSCAN
@@ -111,11 +112,15 @@ class EDSmap:
         self.fov = self.fov.rebin(scale=[binning, binning])
         
         self.eds.metadata.set_item("size_binned", self.eds.isig[0].data.size)
-        self.sem_meta.Detector.EDS.set_item("live_time",
-            self.sem_meta.Detector.EDS.get_item('live_time') / binning**2)
-        self.sem_meta.set_item("Detector.EDS.pixel_dwell",
-            round(self.sem_meta.Detector.EDS.get_item('live_time') / self.eds.metadata.get_item('size_binned'),6))
 
+        self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("live_time",
+            self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.get_item('live_time') / binning**2)
+
+        self.eds.metadata.Acquisition_instrument.SEM.set_item("Detector.EDS.pixel_dwell",
+            round(self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.get_item('live_time') / self.eds.metadata.get_item('size_binned'),6))
+
+        self.eds.metadata.Acquisition_instrument.SEM.set_item('pixel_x', self.eds.metadata.Acquisition_instrument.SEM.get_item('pixel_x') * binning)
+        self.eds.metadata.Acquisition_instrument.SEM.set_item('pixel_y', self.eds.metadata.Acquisition_instrument.SEM.get_item('pixel_y') * binning)
         
     def _xray_lines_cmap_list(self):
         xray_lines = self.eds.metadata.Sample.xray_lines
@@ -185,32 +190,29 @@ class EDSmap:
         self.eds.metadata.set_item("size_original", spd_raw[:,:,0].size)
         self.eds.metadata.set_item("size_binned", self.eds.isig[0].data.size)
         
-        # abbreviation for the nasty long path within the metadata tree
-        self.sem_meta = self.eds.metadata.Acquisition_instrument.SEM
+        self.eds.metadata.Acquisition_instrument.SEM.set_item("beam_energy", meta_host["KV"][0])
+        self.eds.metadata.Acquisition_instrument.SEM.set_item("beam_current", meta_host["BeamCurrent"][0])
+        self.eds.metadata.Acquisition_instrument.SEM.set_item("magnification", meta_host["Magnification"][0])
+        self.eds.metadata.Acquisition_instrument.SEM.set_item("working_distance", meta_host["WD"][0])
         
-        self.sem_meta.set_item("beam_energy", meta_host["KV"][0])
-        self.sem_meta.set_item("beam_current", meta_host["BeamCurrent"][0])
-        self.sem_meta.set_item("magnification", meta_host["Magnification"][0])
-        self.sem_meta.set_item("working_distance", meta_host["WD"][0])
+        self.eds.metadata.Acquisition_instrument.SEM.set_item("pixel_x", meta_map["MicronsPerPixelX"][0])
+        self.eds.metadata.Acquisition_instrument.SEM.set_item("pixel_y", meta_map["MicronsPerPixelY"][0])
+        self.eds.metadata.Acquisition_instrument.SEM.set_item("pixel_x_units", "um")
+        self.eds.metadata.Acquisition_instrument.SEM.set_item("pixel_y_units", "um")
         
-        self.sem_meta.set_item("pixel_x", meta_map["MicronsPerPixelX"][0])
-        self.sem_meta.set_item("pixel_y", meta_map["MicronsPerPixelY"][0])
-        self.sem_meta.set_item("pixel_x_units", "um")
-        self.sem_meta.set_item("pixel_y_units", "um")
-        
-        self.sem_meta.Stage.set_item("rotation", meta_host["Rotation"][0])
-        self.sem_meta.Stage.set_item("tilt_alpha", meta_host["Tilt"][0])
-        self.sem_meta.Stage.set_item("x", meta_host["StageXPosition"][0])
-        self.sem_meta.Stage.set_item("y", meta_host["StageYPosition"][0])
-        self.sem_meta.Stage.set_item("z", meta_host["StageZPosition"][0])        
+        self.eds.metadata.Acquisition_instrument.SEM.Stage.set_item("rotation", meta_host["Rotation"][0])
+        self.eds.metadata.Acquisition_instrument.SEM.Stage.set_item("tilt_alpha", meta_host["Tilt"][0])
+        self.eds.metadata.Acquisition_instrument.SEM.Stage.set_item("x", meta_host["StageXPosition"][0])
+        self.eds.metadata.Acquisition_instrument.SEM.Stage.set_item("y", meta_host["StageYPosition"][0])
+        self.eds.metadata.Acquisition_instrument.SEM.Stage.set_item("z", meta_host["StageZPosition"][0])
 
-        self.sem_meta.Detector.EDS.set_item("azimuth_angle", meta_spc["AzimuthAngle"][0])
-        self.sem_meta.Detector.EDS.set_item("elevation_angle", meta_spc["ElevationAngleActual"][0])
-        self.sem_meta.Detector.EDS.set_item("live_time", meta_spc["LiveTime"][0])
-        self.sem_meta.Detector.EDS.set_item("energy_resolution_MnKa", meta_spc["DetectorResoultion"][0])
-        self.sem_meta.Detector.EDS.set_item("eVpch", meta_spc["evPch"][0])
-        self.sem_meta.Detector.EDS.set_item("eVpch_units", "eV")
-        self.sem_meta.Detector.EDS.set_item("pixel_dwell", round(meta_spc["LiveTime"][0] / self.eds.metadata.get_item('size_binned'), 6))
+        self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("azimuth_angle", meta_spc["AzimuthAngle"][0])
+        self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("elevation_angle", meta_spc["ElevationAngleActual"][0])
+        self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("live_time", meta_spc["LiveTime"][0])
+        self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("energy_resolution_MnKa", meta_spc["DetectorResoultion"][0])
+        self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("eVpch", meta_spc["evPch"][0])
+        self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("eVpch_units", "eV")
+        self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("pixel_dwell", round(meta_spc["LiveTime"][0] / self.eds.metadata.get_item('size_binned'), 6))
         
         # axes calibration
         self.eds.axes_manager[0].name = 'x'
@@ -223,7 +225,7 @@ class EDSmap:
 
         self.eds.axes_manager[-1].name = 'E'
         self.eds.axes_manager['E'].units = 'keV'
-        self.eds.axes_manager['E'].scale = self.sem_meta.Detector.EDS.eVpch / 1000.   # eV per channel
+        self.eds.axes_manager['E'].scale = self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.eVpch / 1000.   # eV per channel
 
         if element_list == None:
             # use elements from file
@@ -243,7 +245,16 @@ class EDSmap:
         f.close()
     
     def plot_eds(self):
-        eds_maps = self.eds.get_lines_intensity()       
+
+        eds_maps = self.eds.get_lines_intensity()
+        cmap_list = self._xray_lines_cmap_list()
+
+        os.makedirs(f"{self.barefile}/{self.comp}", exist_ok=True)
+
+        for i,eds_map in enumerate(eds_maps):
+            line = eds_map.metadata.Sample.xray_lines[0]
+            px = eds_map.metadata.Acquisition_instrument.SEM.pixel_x
+            plt.imsave(f"{self.barefile}/{self.comp}/{line}_px{px:.3g}um.tiff", eds_map, cmap = cmap_list[i])
         
         fig_eds= plt.figure(figsize = (12,9))
         hs.plot.plot_images(eds_maps,
@@ -251,7 +262,7 @@ class EDSmap:
                             tight_layout = True,
                             suptitle = "",
                             per_row = 4,
-                            cmap = self._xray_lines_cmap_list(),
+                            cmap = cmap_list,
                             fig = fig_eds)
         plt.subplots_adjust(wspace = 0.05, hspace = 0.05)
         
@@ -351,7 +362,7 @@ class EDSmap:
             
             s.axes_manager[-1].name = 'E'
             s.axes_manager['E'].units = 'keV'
-            s.axes_manager['E'].scale = self.sem_meta.Detector.EDS.eVpch / 1000.   # eV per channel
+            s.axes_manager['E'].scale = self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.eVpch / 1000.   # eV per channel
     
     def cluster_gui(self):
         
@@ -500,10 +511,10 @@ class EDSmap:
         None.
         """
 
-        live_time = self.sem_meta.Detector.EDS.live_time
+        live_time = self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.live_time
         size_original = self.eds.metadata.get_item('size_original')
         size_binned = self.eds.metadata.get_item('size_binned')
-        px_dwell = self.sem_meta.get_item('Detector.EDS.pixel_dwell')
+        px_dwell = self.eds.metadata.Acquisition_instrument.SEM.Detector.get_item('Detector.EDS.pixel_dwell')
 
         result_pars = []
         
