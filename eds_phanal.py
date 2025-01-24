@@ -249,6 +249,7 @@ class EDSmap:
         eds_maps = self.eds.get_lines_intensity()
         cmap_list = self._xray_lines_cmap_list()
 
+        print(f"{self.barefile}/{self.comp}")
         os.makedirs(f"{self.barefile}/{self.comp}", exist_ok=True)
 
         for i,eds_map in enumerate(eds_maps):
@@ -686,8 +687,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     if args.atlas:
-        process_EDSatlas(args.filename, args.h5path, args.elements, args.binning, args.quiet)
+        process_EDSatlas(args.filename, args.h5path.rstrip('/'), args.elements, args.binning, args.quiet)
         
     elif args.map:
-        process_EDSmap(args.filename, args.h5path, args.elements, args.binning, args.quiet)
+        process_EDSmap(args.filename, args.h5path.rstrip('/'), args.elements, args.binning, args.quiet)
 
