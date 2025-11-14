@@ -44,14 +44,22 @@ def phase_map_plot(data, ax):
     """
     
     # select subset of colormap, according to the number of phases
-    cmap_cur = LinearSegmentedColormap.from_list('cmap_cur', phase_cmap.colors[np.min(data)+1 : np.max(data)+2], np.max(data)-np.min(data)+1)
+    cmap_cur = LinearSegmentedColormap.from_list('cmap_cur', phase_cmap.colors[np.min(data) + 1: np.max(data) + 2],
+                                                 np.max(data) - np.min(data))
+
+    cmap_cur = LinearSegmentedColormap.from_list('cmap_cur', plt.get_cmap('Set1', 9).colors[:np.max(data)+1], np.max(data) - np.min(data))
     
     if np.max(data) != np.min(data):
-        im = ax.imshow(data, cmap = cmap_cur, vmin= np.min(data) - 0.5, vmax=np.max(data) + 0.5)
-        plt.colorbar(im,
-                      ticks=np.arange(np.min(data), np.max(data) + 1),
-                      shrink = 0.75,
-                      aspect = 15)
+        im = ax.imshow(data, cmap = cmap_cur, vmin= -0.5, vmax=np.max(data) + 0.5)
+        im.cmap.set_under('k')
+
+        cax = plt.colorbar(im,
+                      ticks=np.arange(0, np.max(data)+1),
+                      shrink = 0.6,
+                      aspect = (np.max(data)-np.min(data))*2,
+                      extend = "min")
+        cax.ax.set_title("Phase")
+
     else:
         im = ax.imshow(data, cmap = 'Set1')
 
@@ -78,7 +86,12 @@ def process_EDSatlas(fname, h5_path, element_list = None, binning = 1, quiet = F
 
 def process_EDSmap(fname, h5_path, element_list = None, binning = 1, quiet = False):
     eds_map = EDSmap(fname, h5_path, element_list)
-    eds_map.process(binning, quiet)
+    result, cl_params = eds_map.process(binning, quiet)
+
+    with open(f"{fname}_{h5_path}.csv",'w', newline='', encoding='utf-8') as fcsv:
+        wr = csv.writer(fcsv, quoting=csv.QUOTE_NONNUMERIC)
+        wr.writerow(FIELDS)
+        wr.writerows(result)
 
 
 class EDSmap:
@@ -151,7 +164,11 @@ class EDSmap:
                     # show GUI and wait for button
                     repeat = self.cluster_gui()
 
+        # export phase spectra to msa files
         result = self.export_phase_spectra(dead_time)
+
+        # export all elemental maps
+        self.plot_eds(show=False, export=True)
         
         # write individual results to CSV file
         with open(self.barefile+"/"+str(self.comp)+'.csv','w', newline='', encoding='utf-8') as fcsv:
@@ -168,18 +185,18 @@ class EDSmap:
         livemap_path = '/Live Map 1/'
 
         spd_dts =   f[h5_path + livemap_path + 'SPD']
+        fov_dts =   f[h5_path + '/FOVIMAGE']
         meta_host = f[h5_path + livemap_path + 'HOSTPARAMS']
         meta_map =  f[h5_path + livemap_path + 'MAPIMAGEIPR']
         meta_spc =  f[h5_path + livemap_path + 'SPC']
 
         spd_raw = spd_dts[()]
         self.eds = hs.signals.Signal1D(spd_raw)
-        print("EDS loaded")
+        print(f"EDS of size {self.eds.isig[0].data.shape} loaded")
 
-        fov_dts = f[h5_path + '/FOVIMAGE']
-        fov_raw = fov_dts[()].reshape(self.eds.isig[0].data.shape)
-        self.fov = hs.signals.BaseSignal(fov_raw)
-        print("FOV loaded")
+        fov_raw = fov_dts[()]
+        self.fov = hs.signals.BaseSignal(np.reshape(fov_raw, (fov_dts.attrs["PixelHeight"][0],fov_dts.attrs["PixelWidth"][0]))).T
+        print(f"FoV of size {self.fov.data.shape} loaded")
 
         self.eds.set_signal_type("EDS_SEM")
         self.eds.change_dtype("float32")
@@ -213,7 +230,8 @@ class EDSmap:
         self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("eVpch", meta_spc["evPch"][0])
         self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("eVpch_units", "eV")
         self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("pixel_dwell", round(meta_spc["LiveTime"][0] / self.eds.metadata.get_item('size_binned'), 6))
-        
+
+
         # axes calibration
         self.eds.axes_manager[0].name = 'x'
         self.eds.axes_manager[0].units = 'um'
@@ -238,36 +256,38 @@ class EDSmap:
         self.eds.add_lines(lines = (), only_one = False)
 
         self.file = fname
-        self.barefile = fname.rstrip('.edaxh5')
+        self.barefile = fname.removesuffix('.edaxh5').rpartition("/")[-1].rpartition("\\")[-1]
         self.path = h5_path
         self.comp = self.eds.metadata.get_item('comp_number')
 
         f.close()
     
-    def plot_eds(self):
+    def plot_eds(self, show, export):
 
         eds_maps = self.eds.get_lines_intensity()
         cmap_list = self._xray_lines_cmap_list()
 
-        print(f"{self.barefile}/{self.comp}")
-        os.makedirs(f"{self.barefile}/{self.comp}", exist_ok=True)
+        if export == True:
+            print(f"{self.barefile}/{self.comp}")
+            os.makedirs(f"{self.barefile}/{self.comp}", exist_ok=True)
 
-        for i,eds_map in enumerate(eds_maps):
-            line = eds_map.metadata.Sample.xray_lines[0]
-            px = eds_map.metadata.Acquisition_instrument.SEM.pixel_x
-            plt.imsave(f"{self.barefile}/{self.comp}/{line}_px{px:.3g}um.tiff", eds_map, cmap = cmap_list[i])
-        
-        fig_eds= plt.figure(figsize = (12,9))
-        hs.plot.plot_images(eds_maps,
-                            axes_decor='off',
-                            tight_layout = True,
-                            suptitle = "",
-                            per_row = 4,
-                            cmap = cmap_list,
-                            fig = fig_eds)
-        plt.subplots_adjust(wspace = 0.05, hspace = 0.05)
-        
-        fig_eds.show()
+            for i,eds_map in enumerate(eds_maps):
+                line = eds_map.metadata.Sample.xray_lines[0]
+                px = eds_map.metadata.Acquisition_instrument.SEM.pixel_x
+                plt.imsave(f"{self.barefile}/{self.comp}/{line}_px{px:.3g}um.tiff", eds_map, cmap = cmap_list[i])
+
+        if show == True:
+            fig_eds= plt.figure(figsize = (12,9))
+            hs.plot.plot_images(eds_maps,
+                                axes_decor='off',
+                                tight_layout = True,
+                                suptitle = "",
+                                per_row = 4,
+                                cmap = cmap_list,
+                                fig = fig_eds)
+            plt.subplots_adjust(wspace = 0.05, hspace = 0.05)
+
+            fig_eds.show()
     
     def decompose_phases(self):
         # phase decomposition
@@ -278,12 +298,24 @@ class EDSmap:
                 
         self.dec_loads = np.array(np.reshape(self.eds.get_decomposition_loadings(), (self.cl_params["components"], -1)))
         self.dec_loads_sum = np.sum(self.dec_loads, axis = 0)
-        self.dec_loads = self.dec_loads / self.dec_loads_sum
-        self.dec_loads = np.concatenate(( self.dec_loads, np.atleast_2d(self.dec_loads_sum)), axis = 0)
+        # self.dec_loads = self.dec_loads / self.dec_loads_sum
+        # self.dec_loads = np.concatenate(( self.dec_loads, np.atleast_2d(self.dec_loads_sum)), axis = 0)
         
         # add FoV it to the decomposed signals
-        if self.cl_params["use_fov"]:
-            self.to_cluster = np.concatenate((np.reshape(self.fov.data, (self.fov.data.size, 1)), self.dec_loads.T), axis=1)
+
+        fov_eds_factor = (self.fov.data.shape[0] / self.eds.isig[0].data.shape[0],
+                          self.fov.data.shape[1] / self.eds.isig[0].data.shape[1])
+
+        if self.cl_params["use_fov"] & (fov_eds_factor != (1,1)):
+
+            # rebin FoV if the sizes are compatible
+            try:
+                fov_rebinned = self.fov.rebin(scale=fov_eds_factor)
+                self.to_cluster = np.concatenate((np.reshape(fov_rebinned.data, (fov_rebinned.data.size, 1)), self.dec_loads.T),
+                                                 axis=1)
+            except:
+                print("Cannot rebin FoV into EDS shape, FoV is NOT used.")
+                self.to_cluster = self.dec_loads.T
         else:
             self.to_cluster = self.dec_loads.T
 
@@ -385,7 +417,7 @@ class EDSmap:
             plt.close("all")
         
         def eds(event):
-            self.plot_eds()
+            self.plot_eds(show=True, export=False)
             
         def go_on(event):
             self.repeat = None
@@ -515,13 +547,16 @@ class EDSmap:
         live_time = self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.live_time
         size_original = self.eds.metadata.get_item('size_original')
         size_binned = self.eds.metadata.get_item('size_binned')
-        px_dwell = self.eds.metadata.Acquisition_instrument.SEM.Detector.get_item('Detector.EDS.pixel_dwell')
+        px_dwell = self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.get_item('pixel_dwell')
+
+        print(self.eds.metadata)
 
         result_pars = []
         
         spc_name = self.barefile+'/'+str(self.comp)+"_ph_total.msa"       
         self.ph_spc_total.save(spc_name, overwrite=True, encoding = 'utf8')
         spc_temp = hs.load(spc_name)
+
         spc_temp.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("live_time", round((1-dead_time) * px_dwell * size_binned, 3))
         spc_temp.save(spc_name, overwrite=True, encoding = 'utf8')
         result_pars.append((self.file,
@@ -583,14 +618,16 @@ class EDSmap:
         plt.figure(1)
         phase_map_plot(self.phase_map_valid, plt.gca())
         plt.axis('off')
-        plt.title(self.barefile+"_"+str(self.comp))
-        plt.savefig(self.barefile+"/"+str(self.comp)+".png", bbox_inches = 'tight')
+        plt.savefig(self.barefile + "/" + str(self.comp) + ".png", bbox_inches='tight')
+        plt.title(self.barefile + "_" + str(self.comp))
+        plt.savefig(f"{self.barefile}/{self.comp}_t.png", bbox_inches='tight')
         
         plt.figure(2)
         plt.imshow(self.fov, cmap='Greys_r')
         plt.axis('off')
+        plt.savefig(self.barefile + "/" + str(self.comp) + "_fov.png", bbox_inches='tight')
         plt.title(self.barefile+"_"+str(self.comp)+"_fov")
-        plt.savefig(self.barefile+"/"+str(self.comp)+"_fov.png", bbox_inches = 'tight')
+        plt.savefig(self.barefile + "/" + str(self.comp) + "_t_fov.png", bbox_inches = 'tight')
         
         with open(self.barefile + "/" + str(self.comp) + "_cl_params.pickle", 'wb') as fpickle:
             pickle.dump(self.cl_params, fpickle)
@@ -598,80 +635,11 @@ class EDSmap:
         plt.close("all")
         return result_pars
 
-def export_std_to_msa(fname, current):
-    """
-    Export standard spectra from *.edaxh5 file to msa files needed for NTSA-II. Path within h5 file is hardcoded
-
-    Parameters
-    ----------
-    fname : string
-        File name containing the standard spectra.
-    current : float
-        Beam current in nA for proper calibration of the spectrum.
-
-    Returns
-    -------
-    None.
-
-    """
-    
-    filesplit = fname.rsplit(sep = '\\', maxsplit = 1)
-    filepath = filesplit[0]
-    barefile = filesplit[-1].rstrip('.edaxh5')
-    
-    f = h5py.File(fname, "r")
-
-    atlas = f["/"+barefile+"/"]
-    spc_path = 'Area 1/Selected Area 1'
-    
-    for std in atlas.keys():
-        
-        dts_host = f["/".join([barefile, std, spc_path, 'HOSTPARAMS'])]
-        dts_spc =  f["/".join([barefile, std, spc_path, 'SPC'])]
-    
-        spc = hs.signals.Signal1D(dts_spc["SpectrumCounts"][0])
-        
-        spc.set_signal_type("EDS_SEM")
-        spc.change_dtype("float32")
-    
-        # manual reading of metadata
-        spc.metadata.set_item("Compound", std)
-    
-        spc.metadata.Acquisition_instrument.SEM.set_item("beam_energy", dts_host["KV"][0])
-        spc.metadata.Acquisition_instrument.SEM.set_item("beam_current", dts_host["BeamCurrent"][0])
-        spc.metadata.Acquisition_instrument.SEM.set_item("magnification", dts_host["Magnification"][0])
-        spc.metadata.Acquisition_instrument.SEM.set_item("working_distance", dts_host["WD"][0])
-        spc.metadata.Acquisition_instrument.SEM.set_item("Stage.rotation", dts_host["Rotation"][0])
-        spc.metadata.Acquisition_instrument.SEM.set_item("Stage.tilt_alpha", dts_host["Tilt"][0])
-        spc.metadata.Acquisition_instrument.SEM.set_item("Stage.x", dts_host["StageXPosition"][0])
-        spc.metadata.Acquisition_instrument.SEM.set_item("Stage.y", dts_host["StageYPosition"][0])
-        spc.metadata.Acquisition_instrument.SEM.set_item("Stage.z", dts_host["StageZPosition"][0])
-        spc.metadata.Acquisition_instrument.SEM.set_item("beam_current", current)
-        
-        spc.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("azimuth_angle", dts_spc["AzimuthAngle"][0])
-        spc.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("elevation_angle", dts_spc["ElevationAngleActual"][0])
-        spc.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("live_time", dts_spc["LiveTime"][0])
-
-        spc.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("energy_resolution_MnKa", dts_spc["DetectorResoultion"][0])
-        spc.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("eVpch", dts_spc["evPch"][0])
-        spc.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("eVpch_units", "eV")
-        
-        spc.axes_manager[-1].name = 'E'
-        spc.axes_manager['E'].units = 'keV'
-        spc.axes_manager['E'].scale = spc.metadata.Acquisition_instrument.SEM.Detector.EDS.eVpch / 1000.   # eV per channel
-        
-        print(spc.metadata)
-        
-        spc.save('/'.join([filepath, barefile]) + "_" + std + ".msa", overwrite=True, encoding = 'utf8')
-        
-    f.close()
-
-
 if __name__ == "__main__":
     
     parser = ap.ArgumentParser(prog = "EDS phase clustering tool",
                                description = "A tool for phase clustering of EDAX EDS maps, using Non-negative Matrix Factorization for signal decomposition and HDBSCAN for clustering.",
-                               usage = "eds_phanal.py [-h] filename h5path [-a | -m] [-e ELEMENTS [ELEMENTS ...]] [-b BINNING] [-q] [-f]")
+                               usage = "eds_phanal.py [-h] filename h5path [-a | -m] [-e ELEMENTS [ELEMENTS ...]] [-b BINNING] [-q]")
     
     group = parser.add_mutually_exclusive_group()
     group.add_argument('-a', '--atlas', action = 'store_true', help = "Process all maps within a single H5 group.")
