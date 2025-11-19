@@ -25,12 +25,16 @@ def export_std_to_msa(fname, current):
 
     f = h5py.File(fname, "r")
 
-    atlas = f["/" + barefile + "/"]
-    spc_path = 'Area 1/Selected Area 1'
+    atlas = f[list(f.keys())[0]]
 
-    for std in atlas.keys():
-        dts_host = f["/".join([barefile, std, spc_path, 'HOSTPARAMS'])]
-        dts_spc = f["/".join([barefile, std, spc_path, 'SPC'])]
+    def find_spc(name):
+        if '/SPC' in name:
+            return name
+
+    for std_name, std in atlas.items():
+
+        dts_spc = std[std.visit(find_spc)]
+        dts_host = dts_spc.parent['HOSTPARAMS']
 
         spc = hs.signals.Signal1D(dts_spc["SpectrumCounts"][0])
 
@@ -38,7 +42,7 @@ def export_std_to_msa(fname, current):
         spc.change_dtype("float32")
 
         # manual reading of metadata
-        spc.metadata.set_item("Compound", std)
+        spc.metadata.set_item("Compound", std_name)
 
         spc.metadata.Acquisition_instrument.SEM.set_item("beam_energy", dts_host["KV"][0])
         spc.metadata.Acquisition_instrument.SEM.set_item("beam_current", dts_host["BeamCurrent"][0])
@@ -67,7 +71,7 @@ def export_std_to_msa(fname, current):
 
         print(spc.metadata)
 
-        spc.save('/'.join([filepath, barefile]) + "_" + std + ".msa", overwrite=True, encoding='utf8')
+        spc.save('/'.join([filepath, barefile]) + "_" + std_name + ".msa", overwrite=True, encoding='utf8')
 
     f.close()
 
