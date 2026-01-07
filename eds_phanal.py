@@ -10,7 +10,7 @@ from hdbscan import HDBSCAN
 
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Button, Slider, CheckButtons
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import ListedColormap, BoundaryNorm
 
 from mendeleev import element
 import element_cmap
@@ -19,52 +19,7 @@ import csv
 
 FIELDS = ('file', 'path', 'comp', 'size_original', 'size_binned', 'size_valid', 'live_time (s)', 'px_dwell (us)', 'phase_id', 'phase_points', 'phase_live_time (s)')
 
-phase_cmap = element_cmap.prep_phase_colormap()
 element_cmap.prep_elemental_colormaps()
-
-def phase_map_plot(data, ax):
-    """
-    Plot phase map with proper colormap.
-    
-    -1 -- invalid points
-    0--N -- phases
-
-    Parameters
-    ----------
-    data : 2D array
-        DESCRIPTION.
-    ax : axis
-        DESCRIPTION.
-
-    Returns
-    -------
-    im : AxesImage
-        DESCRIPTION.
-
-    """
-    
-    # select subset of colormap, according to the number of phases
-    cmap_cur = LinearSegmentedColormap.from_list('cmap_cur', phase_cmap.colors[np.min(data) + 1: np.max(data) + 2],
-                                                 np.max(data) - np.min(data))
-
-    cmap_cur = LinearSegmentedColormap.from_list('cmap_cur', plt.get_cmap('Set1', 9).colors[:np.max(data)+1], np.max(data) - np.min(data))
-    
-    if np.max(data) != np.min(data):
-        im = ax.imshow(data, cmap = cmap_cur, vmin= -0.5, vmax=np.max(data) + 0.5)
-        im.cmap.set_under('k')
-
-        cax = plt.colorbar(im,
-                      ticks=np.arange(0, np.max(data)+1),
-                      shrink = 0.6,
-                      aspect = (np.max(data)-np.min(data))*2,
-                      extend = "min")
-        cax.ax.set_title("Phase")
-
-    else:
-        im = ax.imshow(data, cmap = 'Set1')
-
-    return im
-
 
 def process_EDSatlas(fname, h5_path, element_list = None, binning = 1, quiet = False):
     
@@ -384,7 +339,15 @@ class EDSmap:
         print("Phases:", self.ph_num_pts)
         print("Total / Clustered / Valid:", self.eds.metadata.get_item('size_binned'), self.ph_num_pts_clustered, self.ph_num_pts_valid)
         print()
-        
+
+        N = np.max(self.phase_map)
+        base = plt.cm.Set1.colors*(N % 9 + 1)  # preserve Set1 indexing
+        self.cmap = ListedColormap(base[:N+1])
+        self.cmap.set_under('k')
+
+        self.bounds = np.arange(-0.5, N + 1.5, 1.0)
+        self.norm = BoundaryNorm(self.bounds, self.cmap.N)
+
         self.ph_spc = hs.signals.Signal1D(ph_spc_raw)
         self.ph_spc_total = hs.signals.Signal1D(self.eds.sum((0,1)))
         self.ph_spc_valid = hs.signals.Signal1D(np.sum(ph_spc_raw[valid_mask_ph,:], axis=0))
@@ -396,7 +359,46 @@ class EDSmap:
             s.axes_manager[-1].name = 'E'
             s.axes_manager['E'].units = 'keV'
             s.axes_manager['E'].scale = self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.eVpch / 1000.   # eV per channel
-    
+
+
+    def phase_map_plot(self, data, ax):
+        """
+        Plot phase map with proper colormap.
+
+        -1 -- invalid points
+        0--N -- phases
+
+        Parameters
+        ----------
+        data : 2D array
+            DESCRIPTION.
+        ax : axis
+            DESCRIPTION.
+
+        Returns
+        -------
+        im : AxesImage
+            DESCRIPTION.
+
+        """
+
+        if np.max(data) != np.min(data):
+            im = ax.imshow(data, cmap=self.cmap, norm=self.norm)
+
+            cax = plt.colorbar(im,
+                               ticks = np.arange(0, np.max(data) + 1),
+                               shrink=0.6,
+                               aspect=(np.max(data) - np.min(data)) * 2,
+                               extend="min")
+            cax.ax.minorticks_off()
+            cax.ax.set_title("Phase")
+
+        else:
+            im = ax.imshow(data, cmap='Set1')
+
+        return im
+
+
     def cluster_gui(self):
         
         def save_cl_params():
@@ -426,7 +428,7 @@ class EDSmap:
 
         fig, ax = plt.subplots(2,3, figsize=(14, 7), gridspec_kw={'width_ratios': [2, 2, 1]})
         
-        phase_map_plot(self.phase_map_valid, ax[0,0])
+        self.phase_map_plot(self.phase_map_valid, ax[0,0])
             
         ax[0,0].axis('off')
         ax[0,1].imshow(self.fov, cmap='Greys_r')   
@@ -448,7 +450,10 @@ class EDSmap:
         ax[1,0].scatter(self.dec_loads[0,subsample], 
                         self.dec_loads[1,subsample],
                         self.dec_loads[2,subsample],
-                        color = phase_cmap.colors[self.phase_map_valid.flatten()[subsample] + 1], # shift by 1, because invalid points with -1 are black (colors[0])
+                        norm = self.norm,
+                        c = self.phase_map_valid.flatten()[subsample],
+                        cmap = self.cmap,
+                        # color = 'k' phase_cmap.colors[self.phase_map_valid.flatten()[subsample] + 1], # shift by 1, because invalid points with -1 are black (colors[0])
                         marker = '.',
                         s = self.dec_loads_sum[subsample]
                         )
@@ -456,28 +461,29 @@ class EDSmap:
         ax[1, 1].remove()
         ax[1, 1] = fig.add_axes((0.4, 0.05, 0.35, 0.4))
 
-        self.cluster_tree.plot(select_clusters=True, selection_palette = phase_cmap.colors[1:][self.ph_order_desc_inv[1:]], axis=ax[1,1])
+        self.cluster_tree.plot(select_clusters=True, selection_palette = self.cmap(self.norm(self.ph_order_desc_inv[1:])), axis=ax[1,1])
 
         ax[0,2].remove()
         ax[1,2].remove()
-        
-        # hard cutoff - phases with less than "hard cutoff" points will not be exported
-        ax_cut = fig.add_axes((0.77, 0.2, 0.03, 0.75))
-        sl_cut = Slider(
-            ax=ax_cut,
-            label="hard cutoff",
+
+        # decomposition dimension
+        ax_comp = fig.add_axes((0.77, 0.2, 0.03, 0.73))
+        sl_comp = Slider(
+            ax=ax_comp,
+            label="Components",
             orientation="vertical",
-            valmin=10,
-            valmax=1000,
-            valinit=self.cl_params["cutoff"],
+            valmin=2,
+            valmax=6,
+            valinit=self.cl_params["components"],
             valstep=1
         )
-        
+
+
         # control elements of clustering parameters
-        ax_cls = fig.add_axes((0.83, 0.2, 0.03, 0.75))
+        ax_cls = fig.add_axes((0.83, 0.2, 0.03, 0.73))
         sl_cls = Slider(
             ax=ax_cls,
-            label='min_cluster_size',
+            label='Min.\ncluster',
             orientation="vertical",
             valmin=10,
             valmax=self.eds.metadata.get_item('size_binned'),
@@ -485,10 +491,10 @@ class EDSmap:
             valstep = 10
         )
         
-        ax_smp = fig.add_axes((0.89, 0.2, 0.03, 0.75))
+        ax_smp = fig.add_axes((0.89, 0.2, 0.03, 0.73))
         sl_smp = Slider(
             ax=ax_smp,
-            label="min_samples",
+            label="Min.\nsamples",
             orientation="vertical",
             valmin=2,
             valmax=200,
@@ -496,15 +502,15 @@ class EDSmap:
             valstep=1
         )
         
-        # decomposition dimension
-        ax_comp = fig.add_axes((0.95, 0.2, 0.03, 0.75))
-        sl_comp = Slider(
-            ax=ax_comp,
-            label="components",
+        # hard cutoff - phases with less than "hard cutoff" points will not be exported
+        ax_cut = fig.add_axes((0.95, 0.2, 0.03, 0.73))
+        sl_cut = Slider(
+            ax=ax_cut,
+            label="Cutoff",
             orientation="vertical",
-            valmin=2,
-            valmax=6,
-            valinit=self.cl_params["components"],
+            valmin=10,
+            valmax=1000,
+            valinit=self.cl_params["cutoff"],
             valstep=1
         )
 
@@ -514,16 +520,16 @@ class EDSmap:
         ax_b4 = fig.add_axes((0.935, 0.1, 0.05, 0.05))
         ax_fov = fig.add_axes((0.770, 0.01, 0.05, 0.05))
 
-        b1 = Button(ax_b1, 'Cluster', hovercolor='0.975')
-        b2 = Button(ax_b2, 'Decompose', hovercolor='0.975')
-        b3 = Button(ax_b3, 'Save', hovercolor='0.975')
-        b4 = Button(ax_b4, 'Elements', hovercolor='0.975')
+        b_dec = Button(ax_b1, 'Decompose', hovercolor='0.975')
+        b_clu = Button(ax_b2, 'Cluster', hovercolor='0.975')
+        b_elem = Button(ax_b3, 'Elements', hovercolor='0.975')
+        b_save = Button(ax_b4, 'Save', hovercolor='0.975')
         b_fov = CheckButtons(ax_fov,['Use FoV'], actives=[self.cl_params["use_fov"]])
 
-        b1.on_clicked(recluster)
-        b2.on_clicked(redecompose)
-        b3.on_clicked(go_on)
-        b4.on_clicked(eds)
+        b_clu.on_clicked(recluster)
+        b_dec.on_clicked(redecompose)
+        b_save.on_clicked(go_on)
+        b_elem.on_clicked(eds)
         fig.subplots_adjust(left=0,right=0.99,top=0.99,bottom=0.0,hspace=0.0,wspace=0.0)
         plt.show()
         
@@ -616,7 +622,7 @@ class EDSmap:
                                 round((1-dead_time) * px_dwell * self.ph_num_pts[i],3)))
             
         plt.figure(1)
-        phase_map_plot(self.phase_map_valid, plt.gca())
+        self.phase_map_plot(self.phase_map_valid, plt.gca())
         plt.axis('off')
         plt.savefig(self.barefile + "/" + str(self.comp) + ".png", bbox_inches='tight')
         plt.title(self.barefile + "_" + str(self.comp))
