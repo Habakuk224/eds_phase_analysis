@@ -9,17 +9,17 @@ This is a tool which:
 
 It uses Non-negative Matrix Factorization for signal decomposition and HDBSCAN for clustering.
 
-## Usage:
+## Usage
 
 `eds_phanal.py [-h] filename h5path [-a | -m] [-e ELEMENTS [ELEMENTS ...]] [-b BINNING] [-q]`
 
-### Positional arguments:
+### Positional arguments
 
   `filename`         Path to the data file
 
   `h5path`           Path within the H5 file to the map (`--map`) or to the group of maps (`--atlas`)
 
-### Options:
+### Options
 
   `-h, --help`            show this help message and exit
 
@@ -33,7 +33,51 @@ It uses Non-negative Matrix Factorization for signal decomposition and HDBSCAN f
 `-b BINNING, --binning BINNING`
 Spatial binning
 
-  `-q, --quiet`           Does not open GUI, uses previously saved parameters from processing.
+  `-q, --quiet`           Does not open GUI, uses previously saved parameters. Intended for batch reprocessing.
 
 ## GUI
 
+In terminal, there will be a summary of current result.
+
+```
+Phase: [7242  798  539  289  119  110]
+Total / Clustered / Valid: 12800 9097 9097
+```
+
+The first line tells you the number of pixels per each phase, the second line the total statistics – 
+map size, points assigned to clusters by HDBSCAN and final points selected as valid (if cutoff is used).
+
+The GUI for tweaking the parameter is shown below. The meaning of plots is following:
+
+- **top left:** color-indexed phase map, invalid points (not assigned to any cluster) are black
+- **top right:** current field of view (SEM data from the h5 file)
+- **bottom left:** visualization of the data in the decomposed space (first 3 dimensions only)
+- **bottom right:** dendrogram of the cluster structure from the HDBSCAN library ([link](https://hdbscan.readthedocs.io/en/latest/advanced_hdbscan.html))
+
+![GUI example](gui.png)
+
+### Sliders
+
+The sliders control various parameters of the decomposition and clustering.
+
+- `Components` number of components (dimension) to be obtained from the decomposition algorithm
+- `Min. cluster` HDBSCAN parameter `min_cluster_size` – minimum size of a group to be considered as a valid cluster
+- `Min. samples` HDBSCAN parameter `min_sample` – minimum size of a group to be considered a core of a possible cluster (before cluster merging)
+- `Cutoff` postprocessing – cutoff of all phases with less points
+
+More on HDBSCAN parameter selection can be found [here](https://hdbscan.readthedocs.io/en/latest/parameter_selection.html).
+
+### Buttons
+- `Decompose` performs decomposition and clustering with new parameters
+- `Cluster` performs clustering only using the previous decomposition results.
+- `Elements` shows the elemental EDS maps for the selected elements
+- `Save` saves the data (maps, phase spectra and parameter) and (in atlas mode) continues to the next map
+- `Use FoV` uses field-of-view image as an additional component for clustering (treated as the first dimension), so the total number of components will be `Components+1`
+
+Decomposition is generally slower than clustering. `Decompose` has to be used when changing `Components` or toggling `Use FoV`, otherwise, using `Cluster` is sufficient.
+
+## References
+
+NNMF
+
+L. McInnes, J. Healy, S. Astels, _hdbscan: Hierarchical density based clustering_ In: Journal of Open Source Software, The Open Journal, volume 2, number 11. 2017
