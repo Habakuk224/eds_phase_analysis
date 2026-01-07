@@ -77,10 +77,14 @@ class EDSmap:
     def rebin(self, binning):
         
         self.eds = self.eds.rebin(scale=[binning, binning, 1])
-        self.fov = self.fov.rebin(scale=[binning, binning])
-        
-        self.eds.metadata.set_item("size_binned", self.eds.isig[0].data.size)
+        eds_size_binned = self.eds.isig[0].data.size
+        self.eds.metadata.set_item("size_binned", eds_size_binned)
 
+        fov_size = self.fov.data.size
+        if fov_size > eds_size_binned:
+            fov_binning = int(np.sqrt(fov_size / eds_size_binned))
+            self.fov = self.fov.rebin(scale=[fov_binning, fov_binning])
+        
         self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("live_time",
             self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.get_item('live_time') / binning**2)
 
