@@ -9,7 +9,7 @@ from hdbscan import HDBSCAN
 #from sklearn.cluster import HDBSCAN
 
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Button, Slider, CheckButtons
+from matplotlib.widgets import Button, Slider, CheckButtons, TextBox
 from matplotlib.colors import ListedColormap, BoundaryNorm
 
 from mendeleev import element
@@ -20,6 +20,85 @@ import csv
 FIELDS = ('file', 'path', 'comp', 'size_original', 'size_binned', 'size_valid', 'live_time (s)', 'px_dwell (us)', 'phase_id', 'phase_points', 'phase_live_time (s)')
 
 element_cmap.prep_elemental_colormaps()
+
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Slider, TextBox
+
+
+class SliderWithText:
+    def __init__(
+        self,
+        fig,
+        slider_rect,
+        textbox_rect,
+        label,
+        valmin,
+        valmax,
+        valinit,
+        on_update=None,
+        fmt="{:d}",
+    ):
+        self.fig = fig
+        self.fmt = fmt
+        self.on_update = on_update
+        self._updating = False
+
+        # Slider
+        ax_slider = fig.add_axes(slider_rect)
+        self.slider = Slider(
+            ax=ax_slider,
+            label=label,
+            valmin=valmin,
+            valmax=valmax,
+            valinit=valinit,
+            valstep=1,
+            orientation="vertical"
+        )
+
+        # TextBox
+        ax_text = fig.add_axes(textbox_rect)
+        self.textbox = TextBox(
+            ax=ax_text,
+            label="",
+            initial=self.fmt.format(valinit),
+            textalignment="right",
+            hovercolor='0.95'
+        )
+
+        self.slider.on_changed(self._from_slider)
+        self.textbox.on_submit(self._from_text)
+
+    def _from_slider(self, val):
+        if self._updating:
+            return
+        self._updating = True
+
+        self.textbox.set_val(self.fmt.format(val))
+        if self.on_update:
+            self.on_update(val)
+
+        self._updating = False
+
+    def _from_text(self, text):
+        if self._updating:
+            return
+
+        try:
+            val = int(text)
+        except ValueError:
+            self.textbox.set_val(self.fmt.format(self.slider.val))
+            return
+
+        val = max(self.slider.valmin, min(self.slider.valmax, val))
+
+        self._updating = True
+        self.slider.set_val(val)
+        self._updating = False
+
+    @property
+    def value(self):
+        return self.slider.val
+
 
 def process_EDSatlas(fname, h5_path, element_list = None, binning = 1, quiet = False):
     
@@ -406,10 +485,10 @@ class EDSmap:
     def cluster_gui(self):
         
         def save_cl_params():
-            self.cl_params["min_cluster_size"] = sl_cls.val
-            self.cl_params["min_samples"] = sl_smp.val
-            self.cl_params["cutoff"] = sl_cut.val
-            self.cl_params["components"] = sl_comp.val
+            self.cl_params["min_cluster_size"] = sl_cls.value
+            self.cl_params["min_samples"] = sl_smp.value
+            self.cl_params["cutoff"] = sl_cut.value
+            self.cl_params["components"] = sl_comp.value
             self.cl_params["use_fov"] = b_fov.get_status()[0]
         
         def recluster(event):
@@ -471,57 +550,56 @@ class EDSmap:
         ax[1,2].remove()
 
         # decomposition dimension
-        ax_comp = fig.add_axes((0.77, 0.2, 0.03, 0.73))
-        sl_comp = Slider(
-            ax=ax_comp,
+        sl_comp = SliderWithText(
+            fig=fig,
+            slider_rect=[0.77, 0.22, 0.05, 0.70],
+            textbox_rect=[0.77, 0.15, 0.05, 0.03],
             label="Components",
-            orientation="vertical",
             valmin=2,
             valmax=6,
             valinit=self.cl_params["components"],
-            valstep=1
+            on_update=None,
         )
-
 
         # control elements of clustering parameters
-        ax_cls = fig.add_axes((0.83, 0.2, 0.03, 0.73))
-        sl_cls = Slider(
-            ax=ax_cls,
+        sl_cls = SliderWithText(
+            fig=fig,
+            slider_rect=[0.825, 0.22, 0.05, 0.70],
+            textbox_rect=[0.825, 0.15, 0.05, 0.03],
             label='Min.\ncluster',
-            orientation="vertical",
-            valmin=10,
+            valmin=1,
             valmax=self.eds.metadata.get_item('size_binned'),
             valinit=self.cl_params["min_cluster_size"],
-            valstep = 10
+            on_update=None,
         )
-        
-        ax_smp = fig.add_axes((0.89, 0.2, 0.03, 0.73))
-        sl_smp = Slider(
-            ax=ax_smp,
+
+        sl_smp = SliderWithText(
+            fig=fig,
+            slider_rect=[0.88, 0.22, 0.05, 0.70],
+            textbox_rect=[0.88, 0.15, 0.05, 0.03],
             label="Min.\nsamples",
-            orientation="vertical",
             valmin=2,
             valmax=200,
             valinit=self.cl_params["min_samples"],
-            valstep=1
+            on_update=None,
         )
-        
+
         # hard cutoff - phases with less than "hard cutoff" points will not be exported
-        ax_cut = fig.add_axes((0.95, 0.2, 0.03, 0.73))
-        sl_cut = Slider(
-            ax=ax_cut,
+        sl_cut = SliderWithText(
+            fig=fig,
+            slider_rect=[0.935, 0.22, 0.05, 0.70],
+            textbox_rect=[0.935, 0.15, 0.05, 0.03],
             label="Cutoff",
-            orientation="vertical",
             valmin=10,
             valmax=1000,
             valinit=self.cl_params["cutoff"],
-            valstep=1
+            on_update=None,
         )
 
-        ax_b1 = fig.add_axes((0.770, 0.1, 0.05, 0.05))
-        ax_b2 = fig.add_axes((0.825, 0.1, 0.05, 0.05))
-        ax_b3 = fig.add_axes((0.880, 0.1, 0.05, 0.05))
-        ax_b4 = fig.add_axes((0.935, 0.1, 0.05, 0.05))
+        ax_b1 = fig.add_axes((0.770, 0.07, 0.05, 0.05))
+        ax_b2 = fig.add_axes((0.825, 0.07, 0.05, 0.05))
+        ax_b3 = fig.add_axes((0.880, 0.07, 0.05, 0.05))
+        ax_b4 = fig.add_axes((0.935, 0.07, 0.05, 0.05))
         ax_fov = fig.add_axes((0.770, 0.01, 0.05, 0.05))
 
         b_dec = Button(ax_b1, 'Decompose', hovercolor='0.975')
