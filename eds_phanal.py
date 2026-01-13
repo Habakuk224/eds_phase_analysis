@@ -4,6 +4,7 @@ import pickle
 import argparse as ap
 import h5py
 import os
+import sys
 
 from hdbscan import HDBSCAN
 #from sklearn.cluster import HDBSCAN
@@ -12,93 +13,237 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Button, Slider, CheckButtons, TextBox
 from matplotlib.colors import ListedColormap, BoundaryNorm
 
+from PySide6.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+    QSlider, QSpinBox, QLabel, QDialog, QGridLayout, QPushButton, QCheckBox, QSizePolicy
+)
+from PySide6.QtCore import Qt, Signal
+
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+
 from mendeleev import element
 import element_cmap
 import csv
 
 
 FIELDS = ('file', 'path', 'comp', 'size_original', 'size_binned', 'size_valid', 'live_time (s)', 'px_dwell (us)', 'phase_id', 'phase_points', 'phase_live_time (s)')
-
+plt.rcParams['figure.constrained_layout.use'] = True
 element_cmap.prep_elemental_colormaps()
 
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, TextBox
 
 
-class SliderWithText:
-    def __init__(
-        self,
-        fig,
-        slider_rect,
-        textbox_rect,
-        label,
-        valmin,
-        valmax,
-        valinit,
-        on_update=None,
-        fmt="{:d}",
-    ):
-        self.fig = fig
-        self.fmt = fmt
-        self.on_update = on_update
+class SliderSpinbox(QWidget):
+    """
+    A combined slider + spinbox widget.
+    Emits `value_changed` signal whenever the user changes the value.
+    """
+
+    value_changed = Signal(float)
+
+    def __init__(self, label, vmin, vmax, initial, step, parent=None):
+        super().__init__(parent)
+
+        self._vmin = vmin
+        self._vmax = vmax
+        self._step = step
+
+        layout = QVBoxLayout(self)
+        if label:
+            layout.addWidget(QLabel(label))
+
+        # Spinbox
+        self.spin = QSpinBox()
+        self.spin.setRange(vmin, vmax)
+        self.spin.setSingleStep(1)
+        self.spin.setValue(initial)
+
+        # Slider (integer scale for smooth movement)
+        self.slider = QSlider(Qt.Vertical)
+        self.slider.setRange(vmin, vmax)
+        self.slider.setValue(initial)
+
+        layout.addWidget(self.slider, stretch=1)
+        layout.addWidget(self.spin)
+
+        # Synchronization flags
         self._updating = False
 
-        # Slider
-        ax_slider = fig.add_axes(slider_rect)
-        self.slider = Slider(
-            ax=ax_slider,
-            label=label,
-            valmin=valmin,
-            valmax=valmax,
-            valinit=valinit,
-            valstep=1,
-            orientation="vertical"
-        )
-
-        # TextBox
-        ax_text = fig.add_axes(textbox_rect)
-        self.textbox = TextBox(
-            ax=ax_text,
-            label="",
-            initial=self.fmt.format(valinit),
-            textalignment="right",
-            hovercolor='0.95'
-        )
-
-        self.slider.on_changed(self._from_slider)
-        self.textbox.on_submit(self._from_text)
+        # Connect slider <-> spinbox
+        self.slider.valueChanged.connect(self._from_slider)
+        self.spin.valueChanged.connect(self._from_spin)
 
     def _from_slider(self, val):
         if self._updating:
             return
         self._updating = True
 
-        self.textbox.set_val(self.fmt.format(val))
-        if self.on_update:
-            self.on_update(val)
-
+        self.spin.setValue(val)
+        self.value_changed.emit(val)
         self._updating = False
 
-    def _from_text(self, text):
+    def _from_spin(self, val):
         if self._updating:
             return
-
-        try:
-            val = int(text)
-        except ValueError:
-            self.textbox.set_val(self.fmt.format(self.slider.val))
-            return
-
-        val = max(self.slider.valmin, min(self.slider.valmax, val))
-
         self._updating = True
-        self.slider.set_val(val)
+
+        self.slider.setValue(val)
+        self.value_changed.emit(val)
         self._updating = False
 
     @property
     def value(self):
-        return self.slider.val
+        """Current numeric value."""
+        return self.spin.value()
 
+    @value.setter
+    def value(self, val):
+        """Set value programmatically."""
+        val = max(self._vmin, min(self._vmax, val))
+        self.spin.setValue(val)
+
+
+class MainClusterDialog(QDialog):
+    """
+    2x3 layout dialog:
+      - Rightmost column: 4 SliderSpinboxes + 4 buttons below
+      - Left/middle columns: reserved for plots or other widgets
+    """
+
+    def __init__(self, map):
+        super().__init__()
+        self.setWindowTitle("Cluster Control")
+        self.map = map
+
+        self.resize(1500, 800)
+        main_layout = QHBoxLayout(self)
+
+        # --- Left / middle columns (can hold plots) ---
+        grid_layout = QGridLayout()
+        self.figs = []
+        self.canvases = []
+        for row in range(2):
+            for col in range(2):
+                fig = Figure()
+                canvas = FigureCanvas(fig)
+
+                self.canvases.append(canvas)
+                self.figs.append(fig)
+
+                grid_layout.addWidget(canvas, row, col)
+
+        main_layout.addLayout(grid_layout, stretch=4)
+
+        # --- Right column: sliders + buttons ---
+        right_col = QGridLayout()
+
+        # Four SliderSpinboxes
+        self.sliders = []
+        slider_paremeters = [{"label": "Components", "vmin" : 2, "vmax": 6, "initial" : self.map.cl_params["components"]},
+                             {"label": "Min. cluster size", "vmin" : 1, "vmax": self.map.eds.metadata.get_item('size_binned'), "initial" : self.map.cl_params["min_cluster_size"]},
+                             {"label": "Min. samples", "vmin" : 2, "vmax": 200, "initial" : self.map.cl_params["min_samples"]},
+                             {"label": "Cutoff", "vmin" : 10, "vmax": 1000, "initial" : self.map.cl_params["cutoff"]}]
+
+        for i, pars in enumerate(slider_paremeters):
+            s = SliderSpinbox(**pars, step=1)
+            self.sliders.append(s)
+            right_col.addWidget(s, 0, i)
+
+        # Four buttons below sliders
+        btn_decompose = QPushButton("Decompose")
+        btn_cluster = QPushButton("Cluster")
+        btn_another = QPushButton("Elements")
+        btn_save = QPushButton("Save")
+        self.chbx_fov = QCheckBox("Use Field of View")
+
+        btn_decompose.clicked.connect(lambda: self._on_button("decompose"))
+        btn_cluster.clicked.connect(lambda: self._on_button("cluster"))
+        btn_another.clicked.connect(lambda: self._on_button("elements"))
+        btn_save.clicked.connect(lambda: self._on_button("save"))  # Save closes dialog
+
+        right_col.addWidget(btn_decompose, 1, 0)
+        right_col.addWidget(btn_cluster, 1, 1)
+        right_col.addWidget(btn_another, 1, 2)
+        right_col.addWidget(btn_save, 1, 3)
+
+        right_col.addWidget(self.chbx_fov, 2, 0, 1, 4)
+
+        main_layout.addLayout(right_col, stretch=1)
+
+        # Initial plot
+        self._update_plot()
+
+    def _on_button(self, action):
+        """Triggered by any of the four buttons"""
+
+        self.result_action = action
+
+        self.map.cl_params["components"] = self.sliders[0].value
+        self.map.cl_params["min_cluster_size"] = self.sliders[1].value
+        self.map.cl_params["min_samples"] = self.sliders[2].value
+        self.map.cl_params["cutoff"] = self.sliders[3].value
+        self.map.cl_params["use_fov"] = self.chbx_fov.isChecked()
+
+        # Call model functions depending on button
+        if action == "decompose":
+            self.map.decompose_phases()
+            self.map.cluster_phases()
+
+        elif action == "cluster":
+            self.map.cluster_phases()
+
+        elif action == "elements":
+            self.map.plot_eds(show=True, export=False)
+
+        elif action == "save":
+            # self.map.cluster_phases()
+            self.accept()
+
+        self._update_plot()
+
+    def _update_plot(self):
+        """Redraw plot using current parameters or last computation"""
+
+        for fig in self.figs:
+            fig.clear()
+
+        ax_fov = self.figs[0].add_subplot()
+        ax_fov.imshow(self.map.fov, cmap='Greys_r')
+        ax_fov.axis('off')
+
+        self.map.phase_map_plot(self.map.phase_map_valid, self.figs[1])
+
+        ax_dec = self.figs[2].add_subplot(projection='3d')
+        ax_dec.view_init(elev=30, azim=45, roll=0)
+
+        subsample = np.random.choice(range(self.map.eds.isig[0].data.size), min(self.map.eds.isig[0].data.size, 10000))
+
+        if self.map.dec_loads.shape[0] == 1:
+            self.map.dec_loads = np.vstack((self.map.dec_loads[0, :],
+                                        np.zeros_like(self.map.dec_loads[0, :]),
+                                        np.zeros_like(self.map.dec_loads[0, :])))
+        elif self.map.dec_loads.shape[0] == 2:
+            self.map.dec_loads = np.vstack((self.map.dec_loads[:2, :],
+                                        np.zeros_like(self.map.dec_loads[0, :])))
+
+        ax_dec.scatter(self.map.dec_loads[0, subsample],
+                       self.map.dec_loads[1, subsample],
+                       self.map.dec_loads[2, subsample],
+                       c=self.map.phase_map_valid.flatten()[subsample],
+                       s=self.map.dec_loads_sum[subsample],
+                       norm=self.map.norm,
+                       cmap=self.map.cmap,
+                       marker='.'
+                       )
+
+        ax_tree = self.figs[3].add_subplot()
+        self.map.cluster_tree.plot(select_clusters=True,
+                                   selection_palette=self.map.cmap(self.map.norm(self.map.ph_order_desc_inv[1:])),
+                                   axis=ax_tree)
+        for canvas in self.canvases:
+            canvas.draw_idle()
 
 def process_EDSatlas(fname, h5_path, element_list = None, binning = 1, quiet = False):
     
@@ -179,28 +324,23 @@ class EDSmap:
         return cmap_list
     
     
-    def process(self, binning, quiet, dead_time = 0.3):
+    def process(self, binning, quiet = False, dead_time = 0.3):
         
         # rebinning to improve phase discrimination
         if binning != 1:
             self.rebin(binning)
-        
-        if quiet:
-            # do not show GUI and use the saved parameters
+
+        self.decompose_phases()
+        self.cluster_phases()
+
+        if not quiet:
+            app = QApplication(sys.argv)
+
             self.decompose_phases()
             self.cluster_phases()
-        else:            
-            # run decomposition (do-while "decompose")
-            repeat = "decompose"
-            while repeat == "decompose":
-                self.decompose_phases()
-            
-                # run interactive ID, plot result (do-while "cluster")
-                repeat = "cluster"
-                while repeat == "cluster":
-                    self.cluster_phases()
-                    # show GUI and wait for button
-                    repeat = self.cluster_gui()
+
+            dlg = MainClusterDialog(self)
+            dlg.exec()  # blocks until Save
 
         # export phase spectra to msa files
         result = self.export_phase_spectra(dead_time)
@@ -418,18 +558,21 @@ class EDSmap:
         self.ph_num_pts_clustered   = int(np.sum(self.ph_num_pts))              # clustered points
         self.ph_num_pts_valid       = int(np.sum(self.ph_num_pts[valid_mask_ph])) # valid points        
         self.phase_map_valid = np.where(valid_mask_map, self.phase_map, -1) # filetered phase map with invalid points as -1
-        
+        self.n_phases_valid = np.max(self.phase_map_valid) + 1 # number of valid phases (after cutoff)
+
+
         print("Phases:", self.ph_num_pts)
         print("Total / Clustered / Valid:", self.eds.metadata.get_item('size_binned'), self.ph_num_pts_clustered, self.ph_num_pts_valid)
         print()
 
-        N = np.max(self.phase_map)
-        base = plt.cm.Set1.colors*(N % 9 + 1)  # preserve Set1 indexing
-        self.cmap = ListedColormap(base[:N+1])
+        # preparation of phase colormap
+        base = plt.cm.Set1.colors*(self.n_phases_valid % 9 + 1)  # preserve Set1 indexing
+        self.cmap = ListedColormap(base[:self.n_phases_valid])
         self.cmap.set_under('k')
 
-        self.bounds = np.arange(-0.5, N + 1.5, 1.0)
+        self.bounds = np.arange(-0.5, self.n_phases_valid + 0.5, 1.0)
         self.norm = BoundaryNorm(self.bounds, self.cmap.N)
+
 
         self.ph_spc = hs.signals.Signal1D(ph_spc_raw)
         self.ph_spc_total = hs.signals.Signal1D(self.eds.sum((0,1)))
@@ -444,7 +587,7 @@ class EDSmap:
             s.axes_manager['E'].scale = self.eds.metadata.Acquisition_instrument.SEM.Detector.EDS.eVpch / 1000.   # eV per channel
 
 
-    def phase_map_plot(self, data, ax):
+    def phase_map_plot(self, data, fig):
         """
         Plot phase map with proper colormap.
 
@@ -465,158 +608,162 @@ class EDSmap:
 
         """
 
-        if np.max(data) != np.min(data):
-            im = ax.imshow(data, cmap=self.cmap, norm=self.norm)
+        axs = fig.subplots(1, 2, width_ratios=(15,1))
+        axs[1].set_aspect(self.n_phases_valid + 1)
 
-            cax = plt.colorbar(im,
-                               ticks = np.arange(0, np.max(data) + 1),
-                               shrink=0.6,
-                               aspect=(np.max(data) - np.min(data)) * 2,
+        if np.max(data) != np.min(data):
+            im = axs[0].imshow(data, cmap=self.cmap, norm=self.norm)
+
+            cbar = fig.colorbar(im,
+                                cax=axs[1],
+                               ticks = np.arange(0, self.n_phases_valid + 1),
                                extend="min")
-            cax.ax.minorticks_off()
-            cax.ax.set_title("Phase")
+            cbar.ax.minorticks_off()
+            cbar.ax.set_title("Phase")
 
         else:
-            im = ax.imshow(data, cmap='Set1')
+            im = axs[0].imshow(data, cmap='Set1')
+
+        axs[0].axis('off')
 
         return im
 
 
-    def cluster_gui(self):
-        
-        def save_cl_params():
-            self.cl_params["min_cluster_size"] = sl_cls.value
-            self.cl_params["min_samples"] = sl_smp.value
-            self.cl_params["cutoff"] = sl_cut.value
-            self.cl_params["components"] = sl_comp.value
-            self.cl_params["use_fov"] = b_fov.get_status()[0]
-        
-        def recluster(event):
-            self.repeat = "cluster"
-            save_cl_params()
-            plt.close("all")
-        
-        def redecompose(event):
-            self.repeat = "decompose"
-            save_cl_params()
-            plt.close("all")
-        
-        def eds(event):
-            self.plot_eds(show=True, export=False)
-            
-        def go_on(event):
-            self.repeat = None
-            plt.close("all")
-
-
-        fig, ax = plt.subplots(2,3, figsize=(14, 7), gridspec_kw={'width_ratios': [2, 2, 1]})
-        
-        self.phase_map_plot(self.phase_map_valid, ax[0,0])
-            
-        ax[0,0].axis('off')
-        ax[0,1].imshow(self.fov, cmap='Greys_r')   
-        ax[0,1].axis('off')
-        
-        ax[1,0].remove()
-        ax[1,0] = fig.add_subplot(2,3,4,projection='3d')
-        ax[1,0].view_init(elev=30, azim=45, roll=0)
-        subsample = np.random.choice(range(self.eds.isig[0].data.size),min(self.eds.isig[0].data.size, 10000))
-        
-        if self.dec_loads.shape[0] == 1:
-            self.dec_loads = np.vstack( (self.dec_loads[0,:],
-                                         np.zeros_like(self.dec_loads[0,:]),
-                                         np.zeros_like(self.dec_loads[0,:])) )
-        elif self.dec_loads.shape[0] == 2:
-            self.dec_loads = np.vstack( (self.dec_loads[:2,:],
-                                         np.zeros_like(self.dec_loads[0,:])) )
-                                       
-        ax[1,0].scatter(self.dec_loads[0,subsample], 
-                        self.dec_loads[1,subsample],
-                        self.dec_loads[2,subsample],
-                        norm = self.norm,
-                        c = self.phase_map_valid.flatten()[subsample],
-                        cmap = self.cmap,
-                        # color = 'k' phase_cmap.colors[self.phase_map_valid.flatten()[subsample] + 1], # shift by 1, because invalid points with -1 are black (colors[0])
-                        marker = '.',
-                        s = self.dec_loads_sum[subsample]
-                        )
-
-        ax[1, 1].remove()
-        ax[1, 1] = fig.add_axes((0.4, 0.05, 0.35, 0.4))
-
-        self.cluster_tree.plot(select_clusters=True, selection_palette = self.cmap(self.norm(self.ph_order_desc_inv[1:])), axis=ax[1,1])
-
-        ax[0,2].remove()
-        ax[1,2].remove()
-
-        # decomposition dimension
-        sl_comp = SliderWithText(
-            fig=fig,
-            slider_rect=[0.77, 0.22, 0.05, 0.70],
-            textbox_rect=[0.77, 0.15, 0.05, 0.03],
-            label="Components",
-            valmin=2,
-            valmax=6,
-            valinit=self.cl_params["components"],
-            on_update=None,
-        )
-
-        # control elements of clustering parameters
-        sl_cls = SliderWithText(
-            fig=fig,
-            slider_rect=[0.825, 0.22, 0.05, 0.70],
-            textbox_rect=[0.825, 0.15, 0.05, 0.03],
-            label='Min.\ncluster',
-            valmin=1,
-            valmax=self.eds.metadata.get_item('size_binned'),
-            valinit=self.cl_params["min_cluster_size"],
-            on_update=None,
-        )
-
-        sl_smp = SliderWithText(
-            fig=fig,
-            slider_rect=[0.88, 0.22, 0.05, 0.70],
-            textbox_rect=[0.88, 0.15, 0.05, 0.03],
-            label="Min.\nsamples",
-            valmin=2,
-            valmax=200,
-            valinit=self.cl_params["min_samples"],
-            on_update=None,
-        )
-
-        # hard cutoff - phases with less than "hard cutoff" points will not be exported
-        sl_cut = SliderWithText(
-            fig=fig,
-            slider_rect=[0.935, 0.22, 0.05, 0.70],
-            textbox_rect=[0.935, 0.15, 0.05, 0.03],
-            label="Cutoff",
-            valmin=10,
-            valmax=1000,
-            valinit=self.cl_params["cutoff"],
-            on_update=None,
-        )
-
-        ax_b1 = fig.add_axes((0.770, 0.07, 0.05, 0.05))
-        ax_b2 = fig.add_axes((0.825, 0.07, 0.05, 0.05))
-        ax_b3 = fig.add_axes((0.880, 0.07, 0.05, 0.05))
-        ax_b4 = fig.add_axes((0.935, 0.07, 0.05, 0.05))
-        ax_fov = fig.add_axes((0.770, 0.01, 0.05, 0.05))
-
-        b_dec = Button(ax_b1, 'Decompose', hovercolor='0.975')
-        b_clu = Button(ax_b2, 'Cluster', hovercolor='0.975')
-        b_elem = Button(ax_b3, 'Elements', hovercolor='0.975')
-        b_save = Button(ax_b4, 'Save', hovercolor='0.975')
-        b_fov = CheckButtons(ax_fov,['Use FoV'], actives=[self.cl_params["use_fov"]])
-
-        b_clu.on_clicked(recluster)
-        b_dec.on_clicked(redecompose)
-        b_save.on_clicked(go_on)
-        b_elem.on_clicked(eds)
-        fig.subplots_adjust(left=0,right=0.99,top=0.99,bottom=0.0,hspace=0.0,wspace=0.0)
-        plt.show()
-        
-        return self.repeat
-        
+    # def cluster_gui(self):
+    #
+    #     def save_cl_params():
+    #         self.cl_params["min_cluster_size"] = sl_cls.value
+    #         self.cl_params["min_samples"] = sl_smp.value
+    #         self.cl_params["cutoff"] = sl_cut.value
+    #         self.cl_params["components"] = sl_comp.value
+    #         self.cl_params["use_fov"] = b_fov.get_status()[0]
+    #
+    #     def recluster(event):
+    #         self.repeat = "cluster"
+    #         save_cl_params()
+    #         plt.close("all")
+    #
+    #     def redecompose(event):
+    #         self.repeat = "decompose"
+    #         save_cl_params()
+    #         plt.close("all")
+    #
+    #     def eds(event):
+    #         self.plot_eds(show=True, export=False)
+    #
+    #     def go_on(event):
+    #         self.repeat = None
+    #         plt.close("all")
+    #
+    #
+    #     fig, ax = plt.subplots(2,3, figsize=(14, 7), gridspec_kw={'width_ratios': [2, 2, 1]})
+    #
+    #     self.phase_map_plot(self.phase_map_valid, ax[0,0])
+    #
+    #     ax[0,0].axis('off')
+    #     ax[0,1].imshow(self.fov, cmap='Greys_r')
+    #     ax[0,1].axis('off')
+    #
+    #     ax[1,0].remove()
+    #     ax[1,0] = fig.add_subplot(2,3,4,projection='3d')
+    #     ax[1,0].view_init(elev=30, azim=45, roll=0)
+    #     subsample = np.random.choice(range(self.eds.isig[0].data.size),min(self.eds.isig[0].data.size, 10000))
+    #
+    #     if self.dec_loads.shape[0] == 1:
+    #         self.dec_loads = np.vstack( (self.dec_loads[0,:],
+    #                                      np.zeros_like(self.dec_loads[0,:]),
+    #                                      np.zeros_like(self.dec_loads[0,:])) )
+    #     elif self.dec_loads.shape[0] == 2:
+    #         self.dec_loads = np.vstack( (self.dec_loads[:2,:],
+    #                                      np.zeros_like(self.dec_loads[0,:])) )
+    #
+    #     ax[1,0].scatter(self.dec_loads[0,subsample],
+    #                     self.dec_loads[1,subsample],
+    #                     self.dec_loads[2,subsample],
+    #                     norm = self.norm,
+    #                     c = self.phase_map_valid.flatten()[subsample],
+    #                     cmap = self.cmap,
+    #                     # color = 'k' phase_cmap.colors[self.phase_map_valid.flatten()[subsample] + 1], # shift by 1, because invalid points with -1 are black (colors[0])
+    #                     marker = '.',
+    #                     s = self.dec_loads_sum[subsample]
+    #                     )
+    #
+    #     ax[1, 1].remove()
+    #     ax[1, 1] = fig.add_axes((0.4, 0.05, 0.35, 0.4))
+    #
+    #     self.cluster_tree.plot(select_clusters=True, selection_palette = self.cmap(self.norm(self.ph_order_desc_inv[1:])), axis=ax[1,1])
+    #
+    #     ax[0,2].remove()
+    #     ax[1,2].remove()
+    #
+    #     # decomposition dimension
+    #     sl_comp = SliderWithText(
+    #         fig=fig,
+    #         slider_rect=[0.77, 0.22, 0.05, 0.70],
+    #         textbox_rect=[0.77, 0.15, 0.05, 0.03],
+    #         label="Components",
+    #         valmin=2,
+    #         valmax=6,
+    #         valinit=self.cl_params["components"],
+    #         on_update=None,
+    #     )
+    #
+    #     # control elements of clustering parameters
+    #     sl_cls = SliderWithText(
+    #         fig=fig,
+    #         slider_rect=[0.825, 0.22, 0.05, 0.70],
+    #         textbox_rect=[0.825, 0.15, 0.05, 0.03],
+    #         label='Min.\ncluster',
+    #         valmin=1,
+    #         valmax=self.eds.metadata.get_item('size_binned'),
+    #         valinit=self.cl_params["min_cluster_size"],
+    #         on_update=None,
+    #     )
+    #
+    #     sl_smp = SliderWithText(
+    #         fig=fig,
+    #         slider_rect=[0.88, 0.22, 0.05, 0.70],
+    #         textbox_rect=[0.88, 0.15, 0.05, 0.03],
+    #         label="Min.\nsamples",
+    #         valmin=2,
+    #         valmax=200,
+    #         valinit=self.cl_params["min_samples"],
+    #         on_update=None,
+    #     )
+    #
+    #     # hard cutoff - phases with less than "hard cutoff" points will not be exported
+    #     sl_cut = SliderWithText(
+    #         fig=fig,
+    #         slider_rect=[0.935, 0.22, 0.05, 0.70],
+    #         textbox_rect=[0.935, 0.15, 0.05, 0.03],
+    #         label="Cutoff",
+    #         valmin=10,
+    #         valmax=1000,
+    #         valinit=self.cl_params["cutoff"],
+    #         on_update=None,
+    #     )
+    #
+    #     ax_b1 = fig.add_axes((0.770, 0.07, 0.05, 0.05))
+    #     ax_b2 = fig.add_axes((0.825, 0.07, 0.05, 0.05))
+    #     ax_b3 = fig.add_axes((0.880, 0.07, 0.05, 0.05))
+    #     ax_b4 = fig.add_axes((0.935, 0.07, 0.05, 0.05))
+    #     ax_fov = fig.add_axes((0.770, 0.01, 0.05, 0.05))
+    #
+    #     b_dec = Button(ax_b1, 'Decompose', hovercolor='0.975')
+    #     b_clu = Button(ax_b2, 'Cluster', hovercolor='0.975')
+    #     b_elem = Button(ax_b3, 'Elements', hovercolor='0.975')
+    #     b_save = Button(ax_b4, 'Save', hovercolor='0.975')
+    #     b_fov = CheckButtons(ax_fov,['Use FoV'], actives=[self.cl_params["use_fov"]])
+    #
+    #     b_clu.on_clicked(recluster)
+    #     b_dec.on_clicked(redecompose)
+    #     b_save.on_clicked(go_on)
+    #     b_elem.on_clicked(eds)
+    #     fig.subplots_adjust(left=0,right=0.99,top=0.99,bottom=0.0,hspace=0.0,wspace=0.0)
+    #     plt.show()
+    #
+    #     return self.repeat
+    #
         
     def export_phase_spectra(self, dead_time = 0):
         """
