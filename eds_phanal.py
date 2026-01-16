@@ -803,7 +803,7 @@ if __name__ == "__main__":
     parser.add_argument('filename', help = "Path to the data file")
     parser.add_argument('h5path', help = "Path within the H5 file to the map (--map) or to the group of maps (--atlas)")
 
-    parser.add_argument('-e', '--elements', nargs = '+', help = "List of chemical element symbols to be used; the list from H5 file is used if not provided expicitly.")
+    parser.add_argument('-e', '--elements', nargs = '+', help = "List of chemical element symbols to be used; the list from H5 file is used if not provided explicitly.")
     parser.add_argument('-b', '--binning', type = int, default=1, help = "Spatial binning")
     parser.add_argument('-q', '--quiet', action = 'store_true', help = "Does not open GUI, uses previously saved parameters from processing.")
 
