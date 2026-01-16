@@ -157,7 +157,7 @@ class MainClusterDialog(QDialog):
         # Four SliderSpinboxes
         self.sliders = []
         slider_paremeters = [{"label": "Components", "vmin" : 2, "vmax": 6, "initial" : self.map.cl_params["components"]},
-                             {"label": "Min. cluster size", "vmin" : 1, "vmax": self.map.eds.metadata.get_item('size_binned'), "initial" : self.map.cl_params["min_cluster_size"]},
+                             {"label": "Min. cluster size", "vmin" : 2, "vmax": self.map.eds.metadata.get_item('size_binned'), "initial" : self.map.cl_params["min_cluster_size"]},
                              {"label": "Min. samples", "vmin" : 2, "vmax": 200, "initial" : self.map.cl_params["min_samples"]},
                              {"label": "Cutoff", "vmin" : 0, "vmax": 1000, "initial" : self.map.cl_params["cutoff"]}]
 
@@ -327,7 +327,7 @@ class EDSmap:
         except FileNotFoundError:
             self.cl_params = {"min_samples" : 4,
                               "min_cluster_size" : 200,
-                              "cutoff": 50,
+                              "cutoff": 10,
                               "components": 3,
                               "use_fov": False}
         else:
@@ -642,23 +642,21 @@ class EDSmap:
 
         """
 
-        axs = fig.subplots(1, 2, width_ratios=(15,1))
-        axs[1].set_aspect(self.n_phases_valid + 1)
+        axs = fig.subplots(1, 2, width_ratios=(19,1))
 
-        # if np.max(data) != np.min(data):
         im = axs[0].imshow(data, cmap=self.cmap, norm=self.norm)
+        axs[0].axis('off')
 
+        axs[1].set_aspect(self.n_phases_valid + 1)
         cbar = fig.colorbar(im,
                             cax=axs[1],
-                           ticks = np.arange(0, self.n_phases_valid + 1),
-                           extend="min")
+                            ticks = np.arange(0, self.n_phases_valid + 1),
+                            extend="min",
+                            extendfrac=0.4/self.n_phases_valid,
+                            drawedges=True)
+
         axs[1].minorticks_off()
-        axs[1].set_title("Phase")
-
-        # else:
-        #     im = axs[0].imshow(data, cmap='Set1')
-
-        axs[0].axis('off')
+        axs[1].tick_params(size=0)
 
         return im
 
