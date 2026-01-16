@@ -159,7 +159,7 @@ class MainClusterDialog(QDialog):
         slider_paremeters = [{"label": "Components", "vmin" : 2, "vmax": 6, "initial" : self.map.cl_params["components"]},
                              {"label": "Min. cluster size", "vmin" : 2, "vmax": self.map.eds.metadata.get_item('size_binned'), "initial" : self.map.cl_params["min_cluster_size"]},
                              {"label": "Min. samples", "vmin" : 2, "vmax": 200, "initial" : self.map.cl_params["min_samples"]},
-                             {"label": "Cutoff", "vmin" : 0, "vmax": 1000, "initial" : self.map.cl_params["cutoff"]}]
+                             {"label": "Cutoff", "vmin" : 0, "vmax": self.map.eds.metadata.get_item('size_binned'), "initial" : self.map.cl_params["cutoff"]}]
 
         for i, pars in enumerate(slider_paremeters):
             s = SliderSpinbox(**pars, step=1)
