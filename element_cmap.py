@@ -3,28 +3,6 @@ import matplotlib as mpl
 from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
 
-# def prep_phase_colormap():
-#     """
-#     Generate discrete colormap with black bottom (invalidated points).
-#
-#     Returns
-#     -------
-#     phase_cmap : colormap
-#
-#     """
-#
-#     cmap = plt.get_cmap('Set1', 9)
-#     phase_cmap = plt.get_cmap('Set1', 9)
-#
-#     # print([[-1, np.array([0,0,0,1])]] + [[i, cmap.colors[i % 9]] for i in range(19)])
-#
-#     phase_cmap = LinearSegmentedColormap.from_list('cmap_cur', [[-1, np.array([0,0,0,1])]] + [[i, cmap.colors[i % 9]] for i in range(19)],20)
-#
-#     # phase_cmap.colors[0] = [0,0,0,1]
-#     # phase_cmap.colors[1:] = cmap.colors[:8]
-#
-#     return phase_cmap
-
 
 def prep_elemental_colormaps():
     """

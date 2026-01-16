@@ -475,12 +475,6 @@ class EDSmap:
         self.path = h5_path
         self.comp = self.eds.metadata.get_item('comp_number')
 
-        print(self.file)
-        print(self.filedir)
-        print(self.barefile)
-        print(self.path)
-        print(self.comp)
-
         f.close()
 
     def export_eds(self):
@@ -503,7 +497,6 @@ class EDSmap:
 
         hs.plot.plot_images(eds_maps,
                             axes_decor='off',
-                            # tight_layout = True,
                             suptitle = "",
                             per_row = 4,
                             cmap = cmap_list,
