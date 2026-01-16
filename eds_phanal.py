@@ -596,7 +596,6 @@ class EDSmap:
         self.phase_map_valid = np.where(valid_mask_map, self.phase_map, -1) # filetered phase map with invalid points as -1
         self.n_phases_valid = np.max(self.phase_map_valid) + 1 # number of valid phases (after cutoff)
 
-
         print("Phases:", self.ph_num_pts)
         print("Total / Clustered / Valid:", self.eds.metadata.get_item('size_binned'), self.ph_num_pts_clustered, self.ph_num_pts_valid)
         print()
@@ -648,15 +647,23 @@ class EDSmap:
         axs[0].axis('off')
 
         axs[1].set_aspect(self.n_phases_valid + 1)
+
+        ticks = np.arange(0, self.n_phases_valid)
+
         cbar = fig.colorbar(im,
                             cax=axs[1],
-                            ticks = np.arange(0, self.n_phases_valid + 1),
+                            ticks = ticks,
                             extend="min",
                             extendfrac=0.4/self.n_phases_valid,
                             drawedges=True)
 
         axs[1].minorticks_off()
+        axs[1].set_yticklabels([])
         axs[1].tick_params(size=0)
+        axs[1].set_anchor('C')
+
+        for tick in ticks:
+            cbar.ax.text(0.5, tick, tick, ha='center', va='center')
 
         return im
 
