@@ -128,7 +128,7 @@ class MainClusterDialog(QDialog):
 
     def __init__(self, map):
         super().__init__()
-        self.setWindowTitle("Cluster Control")
+        self.setWindowTitle(f"Clustering: {map.barefile} — field {map.comp}")
         self.map = map
         self.user_closed = False
 
@@ -187,7 +187,7 @@ class MainClusterDialog(QDialog):
 
         main_layout.addLayout(right_col, stretch=1)
 
-        self.info_window = None  # keep reference
+        self.eds_window = None  # keep reference
 
         # Initial plot
         self._update_plot()
@@ -212,13 +212,16 @@ class MainClusterDialog(QDialog):
             self.map.cluster_phases()
 
         elif action == "elements":
-            if self.info_window is None:
-                self.info_window = InfoWindow(self.map, parent=self)
-            self.info_window.show()
-            self.info_window.raise_()  # bring to front
-            self.info_window.activateWindow()  # focus
+            if self.eds_window is None:
+                self.eds_window = InfoWindow(self.map, parent=self)
+            self.eds_window.show()
+            self.eds_window.raise_()  # bring to front
+            self.eds_window.activateWindow()  # focus
 
         elif action == "save":
+            if self.eds_window is not None:
+                self.eds_window.close()
+
             self.accept()
 
         self._update_plot()
@@ -301,7 +304,7 @@ def process_EDSmap(fname, h5_path, element_list = None, binning = 1, quiet = Fal
     eds_map = EDSmap(fname, h5_path, element_list)
     result, cl_params = eds_map.process(binning, quiet)
 
-    with open(f"{fname}_{h5_path}.csv",'w', newline='', encoding='utf-8') as fcsv:
+    with open(f"{fname}_{eds_map.comp}.csv",'w', newline='', encoding='utf-8') as fcsv:
         wr = csv.writer(fcsv, quoting=csv.QUOTE_NONNUMERIC)
         wr.writerow(FIELDS)
         wr.writerows(result)
@@ -471,6 +474,12 @@ class EDSmap:
 
         self.path = h5_path
         self.comp = self.eds.metadata.get_item('comp_number')
+
+        print(self.file)
+        print(self.filedir)
+        print(self.barefile)
+        print(self.path)
+        print(self.comp)
 
         f.close()
 
@@ -643,18 +652,18 @@ class EDSmap:
         axs = fig.subplots(1, 2, width_ratios=(15,1))
         axs[1].set_aspect(self.n_phases_valid + 1)
 
-        if np.max(data) != np.min(data):
-            im = axs[0].imshow(data, cmap=self.cmap, norm=self.norm)
+        # if np.max(data) != np.min(data):
+        im = axs[0].imshow(data, cmap=self.cmap, norm=self.norm)
 
-            cbar = fig.colorbar(im,
-                                cax=axs[1],
-                               ticks = np.arange(0, self.n_phases_valid + 1),
-                               extend="min")
-            axs[1].minorticks_off()
-            axs[1].set_title("Phase")
+        cbar = fig.colorbar(im,
+                            cax=axs[1],
+                           ticks = np.arange(0, self.n_phases_valid + 1),
+                           extend="min")
+        axs[1].minorticks_off()
+        axs[1].set_title("Phase")
 
-        else:
-            im = axs[0].imshow(data, cmap='Set1')
+        # else:
+        #     im = axs[0].imshow(data, cmap='Set1')
 
         axs[0].axis('off')
 
