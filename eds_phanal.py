@@ -159,7 +159,7 @@ class MainClusterDialog(QDialog):
         slider_paremeters = [{"label": "Components", "vmin" : 2, "vmax": 6, "initial" : self.map.cl_params["components"]},
                              {"label": "Min. cluster size", "vmin" : 1, "vmax": self.map.eds.metadata.get_item('size_binned'), "initial" : self.map.cl_params["min_cluster_size"]},
                              {"label": "Min. samples", "vmin" : 2, "vmax": 200, "initial" : self.map.cl_params["min_samples"]},
-                             {"label": "Cutoff", "vmin" : 10, "vmax": 1000, "initial" : self.map.cl_params["cutoff"]}]
+                             {"label": "Cutoff", "vmin" : 0, "vmax": 1000, "initial" : self.map.cl_params["cutoff"]}]
 
         for i, pars in enumerate(slider_paremeters):
             s = SliderSpinbox(**pars, step=1)
@@ -286,7 +286,7 @@ def process_EDSatlas(fname, h5_path, element_list = None, binning = 1, quiet = F
         result, cl_params = mapa.process(binning, quiet)
         atlas_pars.extend(result)
            
-    with open(fname+'.csv','w', newline='', encoding='utf-8') as fcsv:
+    with open(f"{fname}.csv",'w', newline='', encoding='utf-8') as fcsv:
         wr = csv.writer(fcsv, quoting=csv.QUOTE_NONNUMERIC)
         wr.writerow(FIELDS)
         wr.writerows(atlas_pars)
@@ -320,7 +320,7 @@ class EDSmap:
 
         # if previous settings were saved, load them, assign defaults otherwise
         try:
-            fpickle = open(self.barefile + "/" + str(self.comp) + "_cl_params.pickle", 'rb')
+            fpickle = open(os.path.join(self.filedir, self.barefile, f"{self.comp}_cl_params.pickle"), 'rb')
         except FileNotFoundError:
             self.cl_params = {"min_samples" : 4,
                               "min_cluster_size" : 200,
@@ -381,7 +381,7 @@ class EDSmap:
         self.export_eds()
         
         # write individual results to CSV file
-        with open(self.barefile+"/"+str(self.comp)+'.csv','w', newline='', encoding='utf-8') as fcsv:
+        with open(os.path.join(self.filedir, self.barefile, f"{self.comp}.csv"),'w', newline='', encoding='utf-8') as fcsv:
             wr = csv.writer(fcsv, quoting=csv.QUOTE_NONNUMERIC)
             wr.writerow(FIELDS)
             wr.writerows(result)
@@ -466,7 +466,9 @@ class EDSmap:
         self.eds.add_lines(lines = (), only_one = False)
 
         self.file = fname
-        self.barefile = fname.removesuffix('.edaxh5').rpartition("/")[-1].rpartition("\\")[-1]
+        self.filedir, self.basename = os.path.split(fname)
+        self.barefile = self.basename.removesuffix('.edaxh5').removesuffix(".h5")
+
         self.path = h5_path
         self.comp = self.eds.metadata.get_item('comp_number')
 
@@ -476,13 +478,13 @@ class EDSmap:
         eds_maps = self.eds.get_lines_intensity()
         cmap_list = self._xray_lines_cmap_list()
 
-        print(f"{self.barefile}/{self.comp}")
-        os.makedirs(f"{self.barefile}/{self.comp}", exist_ok=True)
+        print(os.path.join(self.filedir, self.barefile, self.comp))
+        os.makedirs(os.path.join(self.filedir, self.barefile, self.comp), exist_ok=True)
 
         for i, eds_map in enumerate(eds_maps):
             line = eds_map.metadata.Sample.xray_lines[0]
             px = eds_map.metadata.Acquisition_instrument.SEM.pixel_x
-            plt.imsave(f"{self.barefile}/{self.comp}/{line}_px{px:.3g}um.tiff", eds_map, cmap=cmap_list[i])
+            plt.imsave(os.path.join(self.filedir, self.barefile, self.comp, f"{line}_px{px:.3g}um.tiff"), eds_map, cmap=cmap_list[i])
 
 
     def plot_eds(self, fig):
@@ -630,8 +632,6 @@ class EDSmap:
         ----------
         data : 2D array
             DESCRIPTION.
-        ax : axis
-            DESCRIPTION.
 
         Returns
         -------
@@ -650,8 +650,8 @@ class EDSmap:
                                 cax=axs[1],
                                ticks = np.arange(0, self.n_phases_valid + 1),
                                extend="min")
-            cbar.ax.minorticks_off()
-            cbar.ax.set_title("Phase")
+            axs[1].minorticks_off()
+            axs[1].set_title("Phase")
 
         else:
             im = axs[0].imshow(data, cmap='Set1')
@@ -661,142 +661,6 @@ class EDSmap:
         return im
 
 
-    # def cluster_gui(self):
-    #
-    #     def save_cl_params():
-    #         self.cl_params["min_cluster_size"] = sl_cls.value
-    #         self.cl_params["min_samples"] = sl_smp.value
-    #         self.cl_params["cutoff"] = sl_cut.value
-    #         self.cl_params["components"] = sl_comp.value
-    #         self.cl_params["use_fov"] = b_fov.get_status()[0]
-    #
-    #     def recluster(event):
-    #         self.repeat = "cluster"
-    #         save_cl_params()
-    #         plt.close("all")
-    #
-    #     def redecompose(event):
-    #         self.repeat = "decompose"
-    #         save_cl_params()
-    #         plt.close("all")
-    #
-    #     def eds(event):
-    #         self.plot_eds(show=True, export=False)
-    #
-    #     def go_on(event):
-    #         self.repeat = None
-    #         plt.close("all")
-    #
-    #
-    #     fig, ax = plt.subplots(2,3, figsize=(14, 7), gridspec_kw={'width_ratios': [2, 2, 1]})
-    #
-    #     self.phase_map_plot(self.phase_map_valid, ax[0,0])
-    #
-    #     ax[0,0].axis('off')
-    #     ax[0,1].imshow(self.fov, cmap='Greys_r')
-    #     ax[0,1].axis('off')
-    #
-    #     ax[1,0].remove()
-    #     ax[1,0] = fig.add_subplot(2,3,4,projection='3d')
-    #     ax[1,0].view_init(elev=30, azim=45, roll=0)
-    #     subsample = np.random.choice(range(self.eds.isig[0].data.size),min(self.eds.isig[0].data.size, 10000))
-    #
-    #     if self.dec_loads.shape[0] == 1:
-    #         self.dec_loads = np.vstack( (self.dec_loads[0,:],
-    #                                      np.zeros_like(self.dec_loads[0,:]),
-    #                                      np.zeros_like(self.dec_loads[0,:])) )
-    #     elif self.dec_loads.shape[0] == 2:
-    #         self.dec_loads = np.vstack( (self.dec_loads[:2,:],
-    #                                      np.zeros_like(self.dec_loads[0,:])) )
-    #
-    #     ax[1,0].scatter(self.dec_loads[0,subsample],
-    #                     self.dec_loads[1,subsample],
-    #                     self.dec_loads[2,subsample],
-    #                     norm = self.norm,
-    #                     c = self.phase_map_valid.flatten()[subsample],
-    #                     cmap = self.cmap,
-    #                     # color = 'k' phase_cmap.colors[self.phase_map_valid.flatten()[subsample] + 1], # shift by 1, because invalid points with -1 are black (colors[0])
-    #                     marker = '.',
-    #                     s = self.dec_loads_sum[subsample]
-    #                     )
-    #
-    #     ax[1, 1].remove()
-    #     ax[1, 1] = fig.add_axes((0.4, 0.05, 0.35, 0.4))
-    #
-    #     self.cluster_tree.plot(select_clusters=True, selection_palette = self.cmap(self.norm(self.ph_order_desc_inv[1:])), axis=ax[1,1])
-    #
-    #     ax[0,2].remove()
-    #     ax[1,2].remove()
-    #
-    #     # decomposition dimension
-    #     sl_comp = SliderWithText(
-    #         fig=fig,
-    #         slider_rect=[0.77, 0.22, 0.05, 0.70],
-    #         textbox_rect=[0.77, 0.15, 0.05, 0.03],
-    #         label="Components",
-    #         valmin=2,
-    #         valmax=6,
-    #         valinit=self.cl_params["components"],
-    #         on_update=None,
-    #     )
-    #
-    #     # control elements of clustering parameters
-    #     sl_cls = SliderWithText(
-    #         fig=fig,
-    #         slider_rect=[0.825, 0.22, 0.05, 0.70],
-    #         textbox_rect=[0.825, 0.15, 0.05, 0.03],
-    #         label='Min.\ncluster',
-    #         valmin=1,
-    #         valmax=self.eds.metadata.get_item('size_binned'),
-    #         valinit=self.cl_params["min_cluster_size"],
-    #         on_update=None,
-    #     )
-    #
-    #     sl_smp = SliderWithText(
-    #         fig=fig,
-    #         slider_rect=[0.88, 0.22, 0.05, 0.70],
-    #         textbox_rect=[0.88, 0.15, 0.05, 0.03],
-    #         label="Min.\nsamples",
-    #         valmin=2,
-    #         valmax=200,
-    #         valinit=self.cl_params["min_samples"],
-    #         on_update=None,
-    #     )
-    #
-    #     # hard cutoff - phases with less than "hard cutoff" points will not be exported
-    #     sl_cut = SliderWithText(
-    #         fig=fig,
-    #         slider_rect=[0.935, 0.22, 0.05, 0.70],
-    #         textbox_rect=[0.935, 0.15, 0.05, 0.03],
-    #         label="Cutoff",
-    #         valmin=10,
-    #         valmax=1000,
-    #         valinit=self.cl_params["cutoff"],
-    #         on_update=None,
-    #     )
-    #
-    #     ax_b1 = fig.add_axes((0.770, 0.07, 0.05, 0.05))
-    #     ax_b2 = fig.add_axes((0.825, 0.07, 0.05, 0.05))
-    #     ax_b3 = fig.add_axes((0.880, 0.07, 0.05, 0.05))
-    #     ax_b4 = fig.add_axes((0.935, 0.07, 0.05, 0.05))
-    #     ax_fov = fig.add_axes((0.770, 0.01, 0.05, 0.05))
-    #
-    #     b_dec = Button(ax_b1, 'Decompose', hovercolor='0.975')
-    #     b_clu = Button(ax_b2, 'Cluster', hovercolor='0.975')
-    #     b_elem = Button(ax_b3, 'Elements', hovercolor='0.975')
-    #     b_save = Button(ax_b4, 'Save', hovercolor='0.975')
-    #     b_fov = CheckButtons(ax_fov,['Use FoV'], actives=[self.cl_params["use_fov"]])
-    #
-    #     b_clu.on_clicked(recluster)
-    #     b_dec.on_clicked(redecompose)
-    #     b_save.on_clicked(go_on)
-    #     b_elem.on_clicked(eds)
-    #     fig.subplots_adjust(left=0,right=0.99,top=0.99,bottom=0.0,hspace=0.0,wspace=0.0)
-    #     plt.show()
-    #
-    #     return self.repeat
-    #
-        
     def export_phase_spectra(self, dead_time = 0):
         """
         Export spectra of all clusters found within map.
@@ -820,7 +684,7 @@ class EDSmap:
 
         result_pars = []
         
-        spc_name = self.barefile+'/'+str(self.comp)+"_ph_total.msa"       
+        spc_name = os.path.join(self.filedir, self.barefile, f"{self.comp}_ph_total.msa")
         self.ph_spc_total.save(spc_name, overwrite=True, encoding = 'utf8')
         spc_temp = hs.load(spc_name)
 
@@ -838,7 +702,7 @@ class EDSmap:
                             size_binned,
                             round((1-dead_time) * px_dwell * size_binned,3)))
         
-        spc_name = self.barefile+'/'+str(self.comp)+"_ph_valid.msa"          
+        spc_name = os.path.join(self.filedir, self.barefile, f"{self.comp}_ph_valid.msa")
         self.ph_spc_valid.save(spc_name, overwrite=True, encoding = 'utf8')
         spc_temp = hs.load(spc_name)
         spc_temp.metadata.Acquisition_instrument.SEM.Detector.EDS.set_item("live_time", round((1-dead_time) * px_dwell * self.ph_num_pts_valid,3))
@@ -863,7 +727,7 @@ class EDSmap:
             if self.ph_num_pts[i] < self.cl_params["cutoff"]:
                 continue
          
-            spc_name = self.barefile+'/'+str(self.comp)+"_ph_"+str(i)+".msa"
+            spc_name = os.path.join(self.filedir, self.barefile, f"{self.comp}_ph_{str(i)}.msa")
             
             phase.save(spc_name, overwrite=True, encoding = 'utf8')
             spc_temp = hs.load(spc_name)
@@ -882,21 +746,20 @@ class EDSmap:
                                 int(self.ph_num_pts[i]),
                                 round((1-dead_time) * px_dwell * self.ph_num_pts[i],3)))
             
-        plt.figure(1)
-        self.phase_map_plot(self.phase_map_valid, plt.gcf())
-        plt.axis('off')
-        plt.savefig(self.barefile + "/" + str(self.comp) + ".png", bbox_inches='tight')
-        plt.title(self.barefile + "_" + str(self.comp))
-        plt.savefig(f"{self.barefile}/{self.comp}_t.png", bbox_inches='tight')
+        fig1 = plt.figure(1)
+        self.phase_map_plot(self.phase_map_valid, fig1)
+        fig1.savefig(os.path.join(self.filedir, self.barefile, f"{self.comp}.png"), bbox_inches='tight', pad_inches=0)
+        fig1.suptitle(f"{self.barefile}_{str(self.comp)}")
+        fig1.savefig(os.path.join(self.filedir, self.barefile, f"{self.comp}_t.png"), bbox_inches='tight', pad_inches=0)
         
         plt.figure(2)
         plt.imshow(self.fov, cmap='Greys_r')
         plt.axis('off')
-        plt.savefig(self.barefile + "/" + str(self.comp) + "_fov.png", bbox_inches='tight')
-        plt.title(self.barefile+"_"+str(self.comp)+"_fov")
-        plt.savefig(self.barefile + "/" + str(self.comp) + "_t_fov.png", bbox_inches = 'tight')
+        plt.savefig(os.path.join(self.filedir, self.barefile, f"{self.comp}_fov.png"), bbox_inches='tight', pad_inches=0)
+        plt.title(f"{self.barefile}_{str(self.comp)}_fov")
+        plt.savefig(os.path.join(self.filedir, self.barefile, f"{self.comp}_t_fov.png"), bbox_inches = 'tight', pad_inches=0)
         
-        with open(self.barefile + "/" + str(self.comp) + "_cl_params.pickle", 'wb') as fpickle:
+        with open(os.path.join(self.filedir, self.barefile, f"{self.comp}_cl_params.pickle"), 'wb') as fpickle:
             pickle.dump(self.cl_params, fpickle)
         
         plt.close("all")
