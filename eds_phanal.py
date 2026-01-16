@@ -13,7 +13,7 @@ from matplotlib.colors import ListedColormap, BoundaryNorm
 
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QSlider, QSpinBox, QLabel, QDialog, QGridLayout, QPushButton, QCheckBox, QSizePolicy
+    QSlider, QSpinBox, QLabel, QDialog, QGridLayout, QPushButton, QCheckBox, QFrame
 )
 from PySide6.QtCore import Qt, Signal
 
@@ -126,10 +126,10 @@ class MainClusterDialog(QDialog):
       - Left/middle columns: reserved for plots or other widgets
     """
 
-    def __init__(self, map):
+    def __init__(self, edsmap):
         super().__init__()
-        self.setWindowTitle(f"Clustering: {map.barefile} — field {map.comp}")
-        self.map = map
+        self.setWindowTitle(f"Clustering: {edsmap.barefile} — field {edsmap.comp}")
+        self.edsmap = edsmap
         self.user_closed = False
 
         self.resize(1500, 800)
@@ -154,17 +154,29 @@ class MainClusterDialog(QDialog):
         # --- Right column: sliders + buttons ---
         right_col = QGridLayout()
 
+        self.info_text = ""
+
+        frame = QFrame()
+        frame.setFrameShape(QFrame.Box)
+        frame.setFrameShadow(QFrame.Plain)
+        frame_layout = QGridLayout(frame)
+        frame_layout.setContentsMargins(4, 4, 4, 4)
+        self.info_box = QLabel(self.info_text)
+
+        frame_layout.addWidget(self.info_box)
+        right_col.addWidget(frame,0,0,1,4)
+
         # Four SliderSpinboxes
         self.sliders = []
-        slider_paremeters = [{"label": "Components", "vmin" : 2, "vmax": 6, "initial" : self.map.cl_params["components"]},
-                             {"label": "Min. cluster size", "vmin" : 2, "vmax": self.map.eds.metadata.get_item('size_binned'), "initial" : self.map.cl_params["min_cluster_size"]},
-                             {"label": "Min. samples", "vmin" : 2, "vmax": 200, "initial" : self.map.cl_params["min_samples"]},
-                             {"label": "Cutoff", "vmin" : 0, "vmax": self.map.eds.metadata.get_item('size_binned'), "initial" : self.map.cl_params["cutoff"]}]
+        slider_paremeters = [{"label": "Components", "vmin" : 2, "vmax": 6, "initial" : self.edsmap.cl_params["components"]},
+                             {"label": "Min. cluster size", "vmin" : 2, "vmax": self.edsmap.eds.metadata.get_item('size_binned'), "initial" : self.edsmap.cl_params["min_cluster_size"]},
+                             {"label": "Min. samples", "vmin" : 2, "vmax": 200, "initial" : self.edsmap.cl_params["min_samples"]},
+                             {"label": "Cutoff", "vmin" : 0, "vmax": self.edsmap.eds.metadata.get_item('size_binned'), "initial" : self.edsmap.cl_params["cutoff"]}]
 
         for i, pars in enumerate(slider_paremeters):
             s = SliderSpinbox(**pars, step=1)
             self.sliders.append(s)
-            right_col.addWidget(s, 0, i)
+            right_col.addWidget(s, 1, i)
 
         # Four buttons below sliders
         btn_decompose = QPushButton("Decompose")
@@ -178,12 +190,12 @@ class MainClusterDialog(QDialog):
         btn_another.clicked.connect(lambda: self._on_button("elements"))
         btn_save.clicked.connect(lambda: self._on_button("save"))  # Save closes dialog
 
-        right_col.addWidget(btn_decompose, 1, 0)
-        right_col.addWidget(btn_cluster, 1, 1)
-        right_col.addWidget(btn_another, 1, 2)
-        right_col.addWidget(btn_save, 1, 3)
+        right_col.addWidget(btn_decompose, 2, 0)
+        right_col.addWidget(btn_cluster, 2, 1)
+        right_col.addWidget(btn_another, 2, 2)
+        right_col.addWidget(btn_save, 2, 3)
 
-        right_col.addWidget(self.chbx_fov, 2, 0, 1, 4)
+        right_col.addWidget(self.chbx_fov, 3, 0, 1, 4)
 
         main_layout.addLayout(right_col, stretch=1)
 
@@ -197,23 +209,23 @@ class MainClusterDialog(QDialog):
 
         self.result_action = action
 
-        self.map.cl_params["components"] = self.sliders[0].value
-        self.map.cl_params["min_cluster_size"] = self.sliders[1].value
-        self.map.cl_params["min_samples"] = self.sliders[2].value
-        self.map.cl_params["cutoff"] = self.sliders[3].value
-        self.map.cl_params["use_fov"] = self.chbx_fov.isChecked()
+        self.edsmap.cl_params["components"] = self.sliders[0].value
+        self.edsmap.cl_params["min_cluster_size"] = self.sliders[1].value
+        self.edsmap.cl_params["min_samples"] = self.sliders[2].value
+        self.edsmap.cl_params["cutoff"] = self.sliders[3].value
+        self.edsmap.cl_params["use_fov"] = self.chbx_fov.isChecked()
 
         # Call model functions depending on button
         if action == "decompose":
-            self.map.decompose_phases()
-            self.map.cluster_phases()
+            self.edsmap.decompose_phases()
+            self.edsmap.cluster_phases()
 
         elif action == "cluster":
-            self.map.cluster_phases()
+            self.edsmap.cluster_phases()
 
         elif action == "elements":
             if self.eds_window is None:
-                self.eds_window = InfoWindow(self.map, parent=self)
+                self.eds_window = InfoWindow(self.edsmap, parent=self)
             self.eds_window.show()
             self.eds_window.raise_()  # bring to front
             self.eds_window.activateWindow()  # focus
@@ -229,41 +241,44 @@ class MainClusterDialog(QDialog):
     def _update_plot(self):
         """Redraw plot using current parameters or last computation"""
 
+        self.info_box.setText(f"Phases: {self.edsmap.ph_num_pts}\n"
+                     f"Total / Clustered / Valid: {self.edsmap.eds.metadata.get_item('size_binned'), self.edsmap.ph_num_pts_clustered, self.edsmap.ph_num_pts_valid}")
+
         for fig in self.figs:
             fig.clear()
 
         ax_fov = self.figs[0].add_subplot()
-        ax_fov.imshow(self.map.fov, cmap='Greys_r')
+        ax_fov.imshow(self.edsmap.fov, cmap='Greys_r')
         ax_fov.axis('off')
 
-        self.map.phase_map_plot(self.map.phase_map_valid, self.figs[1])
+        self.edsmap.phase_map_plot(self.edsmap.phase_map_valid, self.figs[1])
 
         ax_dec = self.figs[2].add_subplot(projection='3d')
         ax_dec.view_init(elev=30, azim=45, roll=0)
 
-        subsample = np.random.choice(range(self.map.eds.isig[0].data.size), min(self.map.eds.isig[0].data.size, 10000))
+        subsample = np.random.choice(range(self.edsmap.eds.isig[0].data.size), min(self.edsmap.eds.isig[0].data.size, 10000))
 
-        if self.map.dec_loads.shape[0] == 1:
-            self.map.dec_loads = np.vstack((self.map.dec_loads[0, :],
-                                        np.zeros_like(self.map.dec_loads[0, :]),
-                                        np.zeros_like(self.map.dec_loads[0, :])))
-        elif self.map.dec_loads.shape[0] == 2:
-            self.map.dec_loads = np.vstack((self.map.dec_loads[:2, :],
-                                        np.zeros_like(self.map.dec_loads[0, :])))
+        if self.edsmap.dec_loads.shape[0] == 1:
+            self.edsmap.dec_loads = np.vstack((self.edsmap.dec_loads[0, :],
+                                        np.zeros_like(self.edsmap.dec_loads[0, :]),
+                                        np.zeros_like(self.edsmap.dec_loads[0, :])))
+        elif self.edsmap.dec_loads.shape[0] == 2:
+            self.edsmap.dec_loads = np.vstack((self.edsmap.dec_loads[:2, :],
+                                        np.zeros_like(self.edsmap.dec_loads[0, :])))
 
-        ax_dec.scatter(self.map.dec_loads[0, subsample],
-                       self.map.dec_loads[1, subsample],
-                       self.map.dec_loads[2, subsample],
-                       c=self.map.phase_map_valid.flatten()[subsample],
-                       s=self.map.dec_loads_sum[subsample],
-                       norm=self.map.norm,
-                       cmap=self.map.cmap,
+        ax_dec.scatter(self.edsmap.dec_loads[0, subsample],
+                       self.edsmap.dec_loads[1, subsample],
+                       self.edsmap.dec_loads[2, subsample],
+                       c=self.edsmap.phase_map_valid.flatten()[subsample],
+                       s=self.edsmap.dec_loads_sum[subsample],
+                       norm=self.edsmap.norm,
+                       cmap=self.edsmap.cmap,
                        marker='.'
                        )
 
         ax_tree = self.figs[3].add_subplot()
-        self.map.cluster_tree.plot(select_clusters=True,
-                                   selection_palette=self.map.cmap(self.map.norm(self.map.ph_order_desc_inv[1:])),
+        self.edsmap.cluster_tree.plot(select_clusters=True,
+                                   selection_palette=self.edsmap.cmap(self.edsmap.norm(self.edsmap.ph_order_desc_inv[1:])),
                                    axis=ax_tree)
         for canvas in self.canvases:
             canvas.draw_idle()
@@ -568,7 +583,8 @@ class EDSmap:
         ph_spc_raw = np.zeros((self.n_phases, self.eds.data.shape[-1]))
 
         # points with -1 are invalid
-        valid_mask_map = (phase_map_raw != -1)
+        valid_clustered_map = (phase_map_raw != -1)
+        valid_cutoff_map = valid_clustered_map.copy()
         
         for i in range(self.n_phases):
             # current phase mask
@@ -580,7 +596,7 @@ class EDSmap:
             
             # add to final mask only if number of points is larger than "cutoff"
             if self.ph_num_pts[i] < self.cl_params["cutoff"]:
-                valid_mask_map[mask] = False
+                valid_cutoff_map[mask] = False
 
         # sort phases based on number of points and reindex phase map
         self.ph_order_desc       = np.argsort(self.ph_num_pts, kind = 'stable')[::-1]
@@ -590,10 +606,12 @@ class EDSmap:
         self.phase_map      = self.ph_order_desc_inv[phase_map_raw+1]
 
         # cutoff minor phases
-        valid_mask_ph = (self.ph_num_pts > self.cl_params["cutoff"])
+        valid_cutoff_phase_list = (self.ph_num_pts > self.cl_params["cutoff"])
+
         self.ph_num_pts_clustered   = int(np.sum(self.ph_num_pts))              # clustered points
-        self.ph_num_pts_valid       = int(np.sum(self.ph_num_pts[valid_mask_ph])) # valid points        
-        self.phase_map_valid = np.where(valid_mask_map, self.phase_map, -1) # filetered phase map with invalid points as -1
+        self.ph_num_pts_valid       = int(np.sum(self.ph_num_pts[valid_cutoff_phase_list])) # valid points
+
+        self.phase_map_valid = np.where(valid_cutoff_map, self.phase_map, -1) # filetered phase map with invalid points as -1
         self.n_phases_valid = np.max(self.phase_map_valid) + 1 # number of valid phases (after cutoff)
 
         print("Phases:", self.ph_num_pts)
@@ -601,7 +619,7 @@ class EDSmap:
         print()
 
         # preparation of phase colormap
-        base = plt.cm.Set1.colors*(self.n_phases_valid % 9 + 1)  # preserve Set1 indexing
+        base = plt.cm.Set1.colors*(self.n_phases_valid // 9 + 1)  # preserve Set1 indexing
         self.cmap = ListedColormap(base[:self.n_phases_valid])
         self.cmap.set_under('k')
 
@@ -611,7 +629,7 @@ class EDSmap:
 
         self.ph_spc = hs.signals.Signal1D(ph_spc_raw)
         self.ph_spc_total = hs.signals.Signal1D(self.eds.sum((0,1)))
-        self.ph_spc_valid = hs.signals.Signal1D(np.sum(ph_spc_raw[valid_mask_ph,:], axis=0))
+        self.ph_spc_valid = hs.signals.Signal1D(np.sum(ph_spc_raw[valid_cutoff_phase_list,:], axis=0))
         
         for s in [self.ph_spc, self.ph_spc_total, self.ph_spc_valid]:
             s.set_signal_type("EDS_SEM")
