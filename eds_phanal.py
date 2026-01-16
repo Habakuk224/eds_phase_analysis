@@ -7,10 +7,8 @@ import os
 import sys
 
 from hdbscan import HDBSCAN
-#from sklearn.cluster import HDBSCAN
 
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Button, Slider, CheckButtons, TextBox
 from matplotlib.colors import ListedColormap, BoundaryNorm
 
 from PySide6.QtWidgets import (
@@ -31,14 +29,10 @@ FIELDS = ('file', 'path', 'comp', 'size_original', 'size_binned', 'size_valid', 
 plt.rcParams['figure.constrained_layout.use'] = True
 element_cmap.prep_elemental_colormaps()
 
-import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider, TextBox
-
 
 class SliderSpinbox(QWidget):
     """
     A combined slider + spinbox widget.
-    Emits `value_changed` signal whenever the user changes the value.
     """
 
     value_changed = Signal(float)
@@ -105,6 +99,26 @@ class SliderSpinbox(QWidget):
         self.spin.setValue(val)
 
 
+class InfoWindow(QDialog):
+    def __init__(self, edsmap, parent=None):
+        super().__init__(parent)
+
+        self.setWindowTitle("Elemental EDS")
+        layout = QVBoxLayout(self)
+
+        self.setMinimumSize(1200, 800)
+        self.setModal(False)  # non-blocking, user can close independently
+
+        self.fig = Figure(figsize=(5, 4), dpi=100)
+        self.canvas = FigureCanvas(self.fig)
+
+        layout.addWidget(self.canvas)
+
+        # Initial plot
+        edsmap.plot_eds(self.fig)
+        self.canvas.draw_idle()
+
+
 class MainClusterDialog(QDialog):
     """
     2x3 layout dialog:
@@ -116,6 +130,7 @@ class MainClusterDialog(QDialog):
         super().__init__()
         self.setWindowTitle("Cluster Control")
         self.map = map
+        self.user_closed = False
 
         self.resize(1500, 800)
         main_layout = QHBoxLayout(self)
@@ -172,6 +187,8 @@ class MainClusterDialog(QDialog):
 
         main_layout.addLayout(right_col, stretch=1)
 
+        self.info_window = None  # keep reference
+
         # Initial plot
         self._update_plot()
 
@@ -195,10 +212,13 @@ class MainClusterDialog(QDialog):
             self.map.cluster_phases()
 
         elif action == "elements":
-            self.map.plot_eds(show=True, export=False)
+            if self.info_window is None:
+                self.info_window = InfoWindow(self.map, parent=self)
+            self.info_window.show()
+            self.info_window.raise_()  # bring to front
+            self.info_window.activateWindow()  # focus
 
         elif action == "save":
-            # self.map.cluster_phases()
             self.accept()
 
         self._update_plot()
@@ -245,12 +265,20 @@ class MainClusterDialog(QDialog):
         for canvas in self.canvases:
             canvas.draw_idle()
 
+    def closeEvent(self, event):
+        self.user_closed = True
+        event.accept()
+
 def process_EDSatlas(fname, h5_path, element_list = None, binning = 1, quiet = False):
     
     f = h5py.File(fname, "r")
     atlas = f[h5_path]
 
     atlas_pars = []
+
+    app = QApplication.instance()  # check if QApplication exists
+    if app is None:
+        app = QApplication(sys.argv)
 
     for i, comp in enumerate(atlas.keys()):
         print(h5_path+'/'+comp)
@@ -263,7 +291,13 @@ def process_EDSatlas(fname, h5_path, element_list = None, binning = 1, quiet = F
         wr.writerow(FIELDS)
         wr.writerows(atlas_pars)
 
+
 def process_EDSmap(fname, h5_path, element_list = None, binning = 1, quiet = False):
+
+    app = QApplication.instance()  # check if QApplication exists
+    if app is None:
+        app = QApplication(sys.argv)
+
     eds_map = EDSmap(fname, h5_path, element_list)
     result, cl_params = eds_map.process(binning, quiet)
 
@@ -324,7 +358,7 @@ class EDSmap:
         return cmap_list
     
     
-    def process(self, binning, quiet = False, dead_time = 0.3):
+    def process(self, binning, quiet, dead_time = 0.3):
         
         # rebinning to improve phase discrimination
         if binning != 1:
@@ -334,19 +368,17 @@ class EDSmap:
         self.cluster_phases()
 
         if not quiet:
-            app = QApplication(sys.argv)
-
-            self.decompose_phases()
-            self.cluster_phases()
-
             dlg = MainClusterDialog(self)
-            dlg.exec()  # blocks until Save
+            dlg.exec()
+
+            if dlg.user_closed:
+                sys.exit(0)
 
         # export phase spectra to msa files
         result = self.export_phase_spectra(dead_time)
 
         # export all elemental maps
-        self.plot_eds(show=False, export=True)
+        self.export_eds()
         
         # write individual results to CSV file
         with open(self.barefile+"/"+str(self.comp)+'.csv','w', newline='', encoding='utf-8') as fcsv:
@@ -439,33 +471,33 @@ class EDSmap:
         self.comp = self.eds.metadata.get_item('comp_number')
 
         f.close()
-    
-    def plot_eds(self, show, export):
+
+    def export_eds(self):
+        eds_maps = self.eds.get_lines_intensity()
+        cmap_list = self._xray_lines_cmap_list()
+
+        print(f"{self.barefile}/{self.comp}")
+        os.makedirs(f"{self.barefile}/{self.comp}", exist_ok=True)
+
+        for i, eds_map in enumerate(eds_maps):
+            line = eds_map.metadata.Sample.xray_lines[0]
+            px = eds_map.metadata.Acquisition_instrument.SEM.pixel_x
+            plt.imsave(f"{self.barefile}/{self.comp}/{line}_px{px:.3g}um.tiff", eds_map, cmap=cmap_list[i])
+
+
+    def plot_eds(self, fig):
 
         eds_maps = self.eds.get_lines_intensity()
         cmap_list = self._xray_lines_cmap_list()
 
-        if export == True:
-            print(f"{self.barefile}/{self.comp}")
-            os.makedirs(f"{self.barefile}/{self.comp}", exist_ok=True)
+        hs.plot.plot_images(eds_maps,
+                            axes_decor='off',
+                            # tight_layout = True,
+                            suptitle = "",
+                            per_row = 4,
+                            cmap = cmap_list,
+                            fig = fig)
 
-            for i,eds_map in enumerate(eds_maps):
-                line = eds_map.metadata.Sample.xray_lines[0]
-                px = eds_map.metadata.Acquisition_instrument.SEM.pixel_x
-                plt.imsave(f"{self.barefile}/{self.comp}/{line}_px{px:.3g}um.tiff", eds_map, cmap = cmap_list[i])
-
-        if show == True:
-            fig_eds= plt.figure(figsize = (12,9))
-            hs.plot.plot_images(eds_maps,
-                                axes_decor='off',
-                                tight_layout = True,
-                                suptitle = "",
-                                per_row = 4,
-                                cmap = cmap_list,
-                                fig = fig_eds)
-            plt.subplots_adjust(wspace = 0.05, hspace = 0.05)
-
-            fig_eds.show()
     
     def decompose_phases(self):
         # phase decomposition
@@ -851,7 +883,7 @@ class EDSmap:
                                 round((1-dead_time) * px_dwell * self.ph_num_pts[i],3)))
             
         plt.figure(1)
-        self.phase_map_plot(self.phase_map_valid, plt.gca())
+        self.phase_map_plot(self.phase_map_valid, plt.gcf())
         plt.axis('off')
         plt.savefig(self.barefile + "/" + str(self.comp) + ".png", bbox_inches='tight')
         plt.title(self.barefile + "_" + str(self.comp))
