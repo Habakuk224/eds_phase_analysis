@@ -4,7 +4,7 @@ This is a tool which:
 
 1. extracts data from EDAX APEX datasets
 2. does a user-tunable cluster analysis for grouping the pixels into phases
-3. exports the per-phase spectra into *.msa format (to be opened in DTSA analysis tool)
+3. exports the per-phase spectra into *.msa format (to be opened in e.g. DTSA-II analysis tool [link](https://www.cstl.nist.gov/div837/837.02/epq/dtsa2/index.html))
 4. does a basic quantification of the image.
 
 It uses Non-negative Matrix Factorization for signal decomposition and HDBSCAN for clustering.
@@ -78,6 +78,7 @@ Decomposition is generally slower than clustering. `Decompose` has to be used wh
 
 ## References
 
-NNMF
+Lee, Daniel D., and H. Sebastian Seung. Learning the Parts of Objects by Non-Negative Matrix Factorization. Nature 401, no. 6755 (1999): 788–91. [https://doi.org/10.1038/44565].
+
 
 L. McInnes, J. Healy, S. Astels, _hdbscan: Hierarchical density based clustering_ In: Journal of Open Source Software, The Open Journal, volume 2, number 11. 2017
