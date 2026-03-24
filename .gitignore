@@ -1,7 +1,11 @@
-__pycache__
-.spyproject
-h5_files
+/__pycache__
+/.spyproject
+/.idea
 
+/h5_files
+/RCCA_hmg.h5
+/rcca_example.h5
+
+.gitignore
 edax_colors.csv
 edax_colors.png
-

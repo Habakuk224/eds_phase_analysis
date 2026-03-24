@@ -410,9 +410,21 @@ class EDSmap:
     def load_from_edax_h5(self, fname, h5_path, element_list = None):
         f = h5py.File(fname, "r")
         
-        livemap_path = '/Live Map 1/'
+        # Try possible livemap paths
+        possible_paths = ['/Live Map 1/', '/Live Mapa 1/', '/Live Map 2/']
+        livemap_path = None
+        for path in possible_paths:
+            if h5_path + path + 'SPD' in f:
+                livemap_path = path
+                break
+        
+        if livemap_path is None:
+            raise KeyError(f"Could not find livemap path in {h5_path}. Tried: {possible_paths}")
+
+        print(h5_path + livemap_path + 'SPD')
 
         spd_dts =   f[h5_path + livemap_path + 'SPD']
+
         fov_dts =   f[h5_path + '/FOVIMAGE']
         meta_host = f[h5_path + livemap_path + 'HOSTPARAMS']
         meta_map =  f[h5_path + livemap_path + 'MAPIMAGEIPR']
