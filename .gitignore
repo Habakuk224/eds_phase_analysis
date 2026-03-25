@@ -1,6 +1,7 @@
 /__pycache__
 /.spyproject
 /.idea
+/examples
 
 /h5_files
 /RCCA_hmg.h5

@@ -56,11 +56,6 @@ The GUI for tweaking the parameter is shown below. The meaning of plots is follo
 
 ![GUI example](gui.png)
 
-Running following command will show exactly the example above:
-
-```
-python .\eds_phanal.py .\examples\rcca_example.h5 /rcca_alTiTaZrNb/comps/30 -m -e Al Ti Nb Zr Ta -b 2
-```
 
 ### Sliders
 
