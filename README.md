@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/841518254.svg)](https://doi.org/10.5281/zenodo.19217166)
+
 # Clustering-based analysis of EDS maps from EDAX APEX datasets
 
 This is a tool which:
